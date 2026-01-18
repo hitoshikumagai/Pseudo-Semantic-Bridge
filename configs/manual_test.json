@@ -1,0 +1,22 @@
+{
+  "job_name": "Manual_JSON_Test_Job",
+  "search_keywords": [
+    "請求書",
+    "TestEmail"
+  ],
+  "destination_path": "./data/manual_test_output",
+  "rules": [
+    {
+      "extension": ".pdf",
+      "processor_id": "pdf_to_text_ocr"
+    },
+    {
+      "extension": ".xlsx",
+      "processor_id": "save_only"
+    },
+    {
+      "extension": ".zip",
+      "processor_id": "unzip_file"
+    }
+  ]
+}

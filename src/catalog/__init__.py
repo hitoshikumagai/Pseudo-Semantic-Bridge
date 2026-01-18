@@ -1,21 +1,29 @@
-from typing import Callable, Dict, Any
+from typing import Callable, Dict
+from src.schema.definitions import ProcessorType
 
-# ロジックを格納する辞書（シングルトン）
+# レジストリ
 _PROCESSOR_REGISTRY: Dict[str, Callable] = {}
 
 def register_processor(processor_id: str):
-    """関数をカタログに登録するためのデコレータ"""
     def decorator(func: Callable):
-        if processor_id in _PROCESSOR_REGISTRY:
-            raise ValueError(f"ID '{processor_id}' は既に登録されています。")
         _PROCESSOR_REGISTRY[processor_id] = func
         return func
     return decorator
 
 def get_processor(processor_id: str) -> Callable:
-    """エンジンがロジックを取り出すための関数"""
-    logic = _PROCESSOR_REGISTRY.get(processor_id)
-    if not logic:
-        # 未実装の場合は安全策としてエラーにするか、デフォルトを返す
-        raise KeyError(f"ロジックID '{processor_id}' は実装されていません。")
-    return logic
+    if processor_id not in _PROCESSOR_REGISTRY:
+        # 遅延ロード: まだ読み込まれていないモジュールがあればここでimportする
+        # (簡易的に全て読み込んでしまうのが楽です)
+        try:
+            import src.catalog.handlers.basic
+            import src.catalog.handlers.document
+            import src.catalog.handlers.archive
+            import src.catalog.workflows.mail_router # ★ここが重要
+        except ImportError as e:
+            print(f"⚠️ Import Warning: {e}")
+
+    # 再チェック
+    if processor_id in _PROCESSOR_REGISTRY:
+        return _PROCESSOR_REGISTRY[processor_id]
+    
+    raise KeyError(f"ロジックID '{processor_id}' は実装されていません。")

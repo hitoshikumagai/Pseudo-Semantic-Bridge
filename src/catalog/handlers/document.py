@@ -1,21 +1,22 @@
 import os
 from src.catalog import register_processor
-from src.schema.definitions import ProcessorType
-from src.adapter.outlook import AttachmentWrapper
+# ❌ from src.adapter.outlook import AttachmentWrapper  <-- これを消す！
 
-@register_processor(ProcessorType.PDF_OCR)
-def logic_pdf_ocr(attachment: AttachmentWrapper, output_dir: str):
-    abs_output_dir = os.path.abspath(output_dir)
+@register_processor("pdf_to_text_ocr")
+def pdf_to_text_ocr(*args, **kwargs):
+    # 新しい引数の受け取り方 (*args)
+    item = args[0] # ここに来るのはもう Wrapper ではなく UnifiedItem です
+    output_dir = args[1]
+    params = args[2] if len(args) > 2 else kwargs.get("params", {})
+    lang = params.get("lang", "eng")
     
-    # 1. 保存
-    save_path = os.path.join(abs_output_dir, attachment.filename)
-    attachment.save_as(save_path)
-    
-    # 2. OCRシミュレーション
-    txt_filename = attachment.filename + ".txt"
-    txt_path = os.path.join(abs_output_dir, txt_filename)
-    
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(f"【OCR済み】{attachment.filename}\n金額: 10,000円")
+    try:
+        # UnifiedItem なので .save_to() が使えます
+        saved_path = item.save_to(output_dir)
+        filename = os.path.basename(saved_path)
         
-    print(f"    [OCR ] {attachment.filename} をテキスト化しました -> {txt_filename}")
+        print(f"      (Child) 👁️ OCR処理: {filename} [Lang: {lang}]")
+        # ここに OCR ロジック...
+        
+    except Exception as e:
+        print(f"      ❌ OCR Error: {e}")

@@ -1,12 +1,14 @@
 import os
 from src.catalog import register_processor
-from src.schema.definitions import ProcessorType
-from src.adapter.outlook import AttachmentWrapper
+# ❌ from src.adapter.outlook import AttachmentWrapper <-- これを消す！
 
-@register_processor(ProcessorType.SAVE_ONLY)
-def logic_save_only(attachment: AttachmentWrapper, output_dir: str):
-    abs_output_dir = os.path.abspath(output_dir)
-    save_path = os.path.join(abs_output_dir, attachment.filename)
+@register_processor("save_only")
+def save_only(*args, **kwargs):
+    item = args[0]
+    output_dir = args[1]
     
-    attachment.save_as(save_path)
-    print(f"    [保存] {attachment.filename} を保存しました。")
+    try:
+        item.save_to(output_dir)
+        # print(f"      (Child) 💾 保存完了: {item.name}")
+    except Exception as e:
+        print(f"      ❌ Save Error: {e}")

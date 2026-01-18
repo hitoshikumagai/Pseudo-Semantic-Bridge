@@ -1,0 +1,26 @@
+[
+  {
+    "subject_filter": "請求書",
+    "task_name": "INVOICE",
+    "require_attachment": true,
+    "action_id": "ocr_process"
+  },
+  {
+    "subject_filter": "見積",
+    "task_name": "ESTIMATE",
+    "require_attachment": true,
+    "action_id": "save_process"
+  },
+  {
+    "subject_filter": "日報",
+    "task_name": "REPORT",
+    "require_attachment": false,
+    "action_id": "save_process"
+  },
+  {
+    "subject_filter": "*",
+    "task_name": "OTHER",
+    "require_attachment": false,
+    "action_id": "save_process"
+  }
+]

@@ -9,22 +9,10 @@
   "destination_path": "./data/excel_output",
   "rules": [
     {
-      "extension": ".pdf",
-      "processor_id": "pdf_to_text_ocr",
+      "extension": ".msg",
+      "processor_id": "mail_workflow",
       "parameters": {
-        "lang": "jpn"
-      }
-    },
-    {
-      "extension": ".xlsx",
-      "processor_id": "save_only",
-      "parameters": {}
-    },
-    {
-      "extension": ".zip",
-      "processor_id": "unzip_file",
-      "parameters": {
-        "mode": "manual"
+        "rule_file": "./configs/accounting/mail_business_rules.json"
       }
     }
   ]

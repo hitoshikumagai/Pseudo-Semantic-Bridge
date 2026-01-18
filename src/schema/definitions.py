@@ -6,6 +6,7 @@ class ProcessorType(str, Enum):
     SAVE_ONLY = "save_only"
     PDF_OCR = "pdf_to_text_ocr"
     UNZIP = "unzip_file"
+    MAIL_WORKFLOW = "mail_workflow"
 
 class AttachmentRule(BaseModel):
     extension: str

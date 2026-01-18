@@ -1,10 +1,7 @@
 import os
-import logging
+from src.schema.definitions import OutlookConfig
+# Adapterは抽象クラスとして受け取るのが理想だが、便宜上型ヒント等は省略
 from src.catalog import get_processor
-from src.schema.definitions import OutlookConfig, AttachmentRule, ProcessorType
-
-# ログ設定（本番運用を見越してprintではなくlogger推奨だが、今回は分かりやすくprint併用）
-logger = logging.getLogger(__name__)
 
 class GenericEtlEngine:
     def __init__(self, config: OutlookConfig, adapter):
@@ -12,77 +9,78 @@ class GenericEtlEngine:
         self.adapter = adapter
 
     def run(self):
-        """ジョブの実行メインループ"""
         print(f"🚀 Engine Start: {self.config.job_name} (v{self.config.version})")
         
-        # 0. 保存先の準備
-        if not os.path.exists(self.config.destination_path):
-            os.makedirs(self.config.destination_path)
-            print(f"    📁 Created dir: {self.config.destination_path}")
-        
-        # 1. Outlook接続
-        try:
-            self.adapter.connect()
-        except Exception as e:
-            print(f"❌ Outlook接続エラー: {e}")
-            return
-
-        # 2. 検索ループ
         for keyword in self.config.search_keywords:
-            # アダプターから添付ファイルを順次取得
-            attachments = self.adapter.fetch_attachments(keyword)
-            
-            for attachment in attachments:
-                self._process_single_attachment(attachment)
+            items = self.adapter.fetch_items(keyword)
+            print(f">> [Adapter] 検索 '{keyword}': {len(items)} 件ヒット")
 
+            for item in items:
+                self._process_recursive(item)
+        
         print("✅ Engine Finished.")
 
-    def _process_single_attachment(self, attachment):
-        """添付ファイル1つに対する処理"""
+    def _process_recursive(self, item):
+        """
+        UnifiedItem を受け取り、再帰的に処理する
+        """
+        # 1. ルール適合チェック
+        # アイテムの拡張子 (.msg, .pdf 等) を見て、対応するルールがあれば実行
+        rule_executed = self._try_execute_rule(item)
         
-        # A. ルール検索 (どのルールに当てはまるか？)
-        rule = self._find_matching_rule(attachment.filename)
-        
-        if not rule:
-            # マッチするルールがない場合はスキップ（またはデフォルト処理）
-            print(f"    ⏭️ Skip: {attachment.filename} (No matching rule)")
+        # 2. ルールが実行されたら、そのハンドラーに全権委任（子要素処理はハンドラー次第）
+        if rule_executed:
             return
 
-        # B. ロジック（関数）の取得
-        handler = get_processor(rule.processor_id)
-        if not handler:
-            print(f"    ⚠️ Warning: 未実装のロジックIDです ({rule.processor_id})")
-            return
+        # 3. ルールが実行されず、かつコンテナ（フォルダ/メール）なら、自動で中身を掘る
+        if item.is_container:
+            # print(f"   📂 Opening Container: {item.name}")
+            for child in item.get_children():
+                self._process_recursive(child)
 
-        # C. ロジックの実行 (★v2.0: パラメータを渡す)
-        try:
-            print(f"    ⚙️ Executing {rule.processor_id} for {attachment.filename}...")
-            
-            # ハンドラには「添付ファイル」「保存先」「パラメータ(辞書)」の3つを渡す
-            handler(
-                attachment, 
-                self.config.destination_path, 
-                rule.parameters  # ★ここが重要！Excel/JSONに書かれた指示書を渡す
-            )
-            
-        except TypeError as e:
-            # 古いハンドラ（引数が2つしかない場合）への救済措置
-            print(f"    ⚠️ v1互換モードで実行します: {e}")
-            handler(attachment, self.config.destination_path)
-        except Exception as e:
-            print(f"    💥 Error in handler: {e}")
-
-    def _find_matching_rule(self, filename: str) -> AttachmentRule:
+    def _try_execute_rule(self, item) -> bool:
         """
-        ファイル名に基づいて適用すべきルールオブジェクトを返す
+        アイテムの拡張子を見て、適合するルールがあれば実行する
         """
-        ext = os.path.splitext(filename)[1].lower()
+        target_rule = None
+        # UnifiedItemから拡張子を取得（例: .pdf, .msg）
+        ext = item.extension.lower()
         
-        # 設定されたルールを上から順に走査
+        # 設定(rules)から、この拡張子に対応するルールを探す
         for rule in self.config.rules:
-            # 現在は拡張子の一致のみを見ているが、
-            # 将来ここで「ファイル名正規表現」などの条件判定も追加可能
             if rule.extension.lower() == ext:
-                return rule
+                target_rule = rule
+                break
         
-        return None
+        # ルールがなければ何もしない
+        if not target_rule:
+            return False
+
+        # --- 修正ポイント: Enum対策 ---
+        # processor_id が Enum(ProcessorType) の場合と、文字列の場合があるため吸収する
+        # (JSONから読み込んだ場合は文字列、コード定義の場合はEnumの可能性がある)
+        raw_id = target_rule.processor_id
+        
+        # Enumなら .value ("mail_workflow") を取り出し、文字列ならそのまま使う
+        processor_id = raw_id.value if hasattr(raw_id, "value") else raw_id
+
+        # ログ出力 (Enumではなく変換後のIDを表示)
+        print(f"   ⚙️  Running Rule [{processor_id}] for: {item.name} ({ext})")
+
+        try:
+            # IDに対応する関数（Handler/Workflow）を取得
+            # ここで文字列の "mail_workflow" などが渡されるので KeyError にならない
+            handler = get_processor(processor_id)
+            
+            # 実行 (UnifiedItemをそのまま渡す)
+            handler(
+                item, 
+                self.config.destination_path, 
+                target_rule.parameters
+            )
+            return True
+        except Exception as e:
+            print(f"   ❌ Engine Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return False

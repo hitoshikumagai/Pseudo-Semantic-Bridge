@@ -1,0 +1,31 @@
+{
+  "job_name": "Excel_Driven_Bot_V2",
+  "version": "2.0",
+  "domain": "Accounting",
+  "search_keywords": [
+    "\u8acb\u6c42\u66f8",
+    "Invoice"
+  ],
+  "destination_path": "./data/excel_output",
+  "rules": [
+    {
+      "extension": ".pdf",
+      "processor_id": "pdf_to_text_ocr",
+      "parameters": {
+        "lang": "jpn"
+      }
+    },
+    {
+      "extension": ".xlsx",
+      "processor_id": "save_only",
+      "parameters": {}
+    },
+    {
+      "extension": ".zip",
+      "processor_id": "unzip_file",
+      "parameters": {
+        "mode": "manual"
+      }
+    }
+  ]
+}

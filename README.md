@@ -13,71 +13,36 @@
 
 In traditional ETL/Automation, business logic is often hard-coded. PSB introduces a **Metadata-Driven Layer** that acts as a "Bridge". Users define rules in **Excel** (Intent), which are compiled into strict **JSON** (Contract), and executed by a generic **Engine** (Mechanism).
 
-### Key Concepts
+### v2.0 Key Concepts
 
-* **Metadata-First:** Execution logic is controlled entirely by JSON schemas (validated by Pydantic).
-* **Policy Injection (v2.0):** Business policies (e.g., `{"mode": "manual"}`) are injected as parameters from Excel directly to the logic.
-* **Layer Separation:** The Engine (Python) does not know the Business Rules; it only knows how to execute the instructions given by the Bridge.
-
----
-
-## ⚡ Quick Start (Jupyter Notebook)
-
-You can experience the full "Excel → JSON → Engine" cycle immediately using the provided notebook.
-
-1. **Install Dependencies:**
-```bash
-pip install pandas openpyxl pydantic pywin32
-
-```
-
-
-2. **Run the Demo:**
-Open **`sample copy.ipynb`** (or `quick_run.ipynb`) and execute all cells.
-* **Step 1:** It creates a mock Excel file (`specs/quickrun/test_spec.xlsx`).
-* **Step 2:** It compiles the Excel into a JSON config (`configs/quickrun/test_config.json`).
-* **Step 3:** It launches the Engine.
-* *Note: If the demo includes a `.zip` file rule with `mode: manual`, check the console for a password input prompt.*
-
-
-
-
+* **Two-Tier Rule System:** Separates "System Pipelines" (File Extension routing) from "Business Logic" (Subject-based task dispatching).
+* **Compile-Time Validation:** Excel rules are validated and compiled into JSON *before* runtime, ensuring speed and stability.
+* **Workflow Integration:** Complex logic (like mail sorting) is handled by dedicated Workflows that read their own JSON-compiled rule sets.
 
 ---
 
 ## 🏗 Architecture
 
-The system consists of four distinct layers:
-
-1. **Intent (Layer 1):** Human requirements defined in **Excel**.
-2. **Bridge (Layer 2):** A Python Parser that converts Excel into strictly validated Metadata.
-3. **Metadata (Layer 3):** JSON Artifacts (The Single Source of Truth).
-4. **Engine (Layer 4):** A generic Dispatcher that executes the Logic Catalog.
+The system consists of distinct layers, now enhanced with a **Workflow Layer** for business logic.
 
 ```mermaid
 graph TD
-    subgraph Human Context
-        A[Layer 1: Excel Spec]
-        NoteA[Define Rules & Params]
+    subgraph Design Phase [Layer 1 & 2: Bridge]
+        A1[specs/system_spec.xlsx] -->|Compile| B[Builder (Facade)]
+        A2[specs/business_rules.xlsx] -->|Compile| B
+        B -->|Generate| C1[configs/system.json]
+        B -->|Generate| C2[configs/rules.json]
     end
 
-    subgraph Bridge System
-        B[Layer 2: Excel Parser]
-        C[Layer 3: Metadata JSON]
-        NoteC[Strict Schema v2.0]
+    subgraph Runtime Phase [Layer 3 & 4: Engine]
+        D[Generic Engine] -->|Load| C1
+        D -->|Dispatch| E{Router}
+        E -->|extension=.pdf| F[Handler: OCR]
+        E -->|extension=.msg| G[Workflow: Mail Router]
+        
+        G -->|Load| C2
+        G -->|Business Logic| H[Handler: Save / OCR / Unzip]
     end
-
-    subgraph Runtime System
-        D[Layer 4: Execution Engine]
-        E[Logic Catalog]
-        F[External IO]
-    end
-
-    A -->|Parse| B
-    B -->|Generate| C
-    C -->|Load| D
-    D -->|Dispatch with Params| E
-    E -->|Action| F
 
 ```
 
@@ -87,16 +52,19 @@ graph TD
 
 ```text
 project_root/
-├── configs/                 # [Layer 3] Generated JSON artifacts (The Truth)
-├── specs/                   # [Layer 1] User input files (Excel)
-├── data/                    # [Runtime] Runtime data (Ignored by Git)
-├── main.py                  # [Entrypoint] Generic Runner
+├── main.py                  # [Entrypoint] Runs Builder -> Engine automatically
+├── specs/                   # [Input] User Intent (Excel)
+│   └── accounting/
+│       ├── invoice_bot_v2.xlsx      # System Pipeline (Extension -> Processor)
+│       └── mail_business_rules.xlsx # Business Logic (Subject -> Task)
+├── configs/                 # [Artifacts] Compiled JSON (Machine Readable)
+├── data/                    # [Output] Processed results
 └── src/
-    ├── bridge/              # [Layer 2] Excel Parser & Generator
-    ├── schema/              # [Layer 3] Pydantic Definitions
-    ├── engine/              # [Layer 4] Generic Dispatcher
-    ├── catalog/             # [Layer 4] Logic Components (Pure Functions)
-    └── adapter/             # I/O Adapters (Outlook, etc.)
+    ├── bridge/              # Excel Parser & Builder
+    ├── engine/              # Generic Dispatcher
+    └── catalog/
+        ├── workflows/       # Complex Logic (e.g., Mail Routing)
+        └── handlers/        # Atomic Actions (OCR, Save, Unzip)
 
 ```
 
@@ -104,51 +72,67 @@ project_root/
 
 ## 🛠️ Excel Specification Format
 
-To add new rules, edit the Excel file in `specs/`.
+To modify behavior, edit the Excel files in `specs/`.
 
-### Sheet 1: `Settings`
+### File 1: System Pipeline (`invoice_bot_v2.xlsx`)
 
-Basic job configuration.
-
-| Key | Value |
-| --- | --- |
-| **Job Name** | Invoice_Bot_v1 |
-| **Domain** | Accounting |
-| **Keywords** | Invoice, Payment |
-| **Destination** | ./data/invoices |
-
-### Sheet 2: `Rules`
-
-Defines how to process each file type. **Parameters** can be passed as a JSON string.
+Defines **"Which tool to use for which file type"**.
 
 | Extension | Processor ID | Parameters (JSON) | Note |
 | --- | --- | --- | --- |
-| `.pdf` | `pdf_to_text_ocr` | `{"lang": "jpn"}` | OCR Japanese docs |
-| `.zip` | `unzip_file` | `{"mode": "manual"}` | Ask user for password |
-| `.xlsx` | `save_only` |  | Just save |
+| `.pdf` | `pdf_to_text_ocr` | `{"lang": "jpn"}` | Direct OCR |
+| `.zip` | `unzip_file` | `{"mode": "manual"}` | Unzip w/ password |
+| **`.msg`** | **`mail_workflow`** | **`{"rule_file": "./configs/.../mail_business_rules.json"}`** | **Delegate to Workflow** |
+
+### File 2: Business Rules (`mail_business_rules.xlsx`)
+
+Defines **"How to handle specific business tasks"** (used by `mail_workflow`).
+Supports defining different actions for different file types within the same task.
+
+| subject_filter | task_name | require_attachment | target_ext | action_id | parameters |
+| --- | --- | --- | --- | --- | --- |
+| 請求書 | INVOICE | True | **.pdf** | **ocr_process** | `{"lang": "jpn"}` |
+| 請求書 | INVOICE | True | **.xlsx** | **save_only** | `{}` |
+| 日報 | REPORT | False | * | save_process | `{}` |
 
 ---
 
-## 🚀 Usage Workflow (Production)
+## 🚀 Usage Workflow
 
-### 1. Update Rules
-
-Modify `specs/accounting/invoice_bot.xlsx`.
-
-### 2. Compile Bridge
-
-Convert the Excel spec to a JSON configuration file.
+### 1. Install Dependencies
 
 ```bash
-python -m src.bridge.excel_parser
+pip install pandas openpyxl pydantic pywin32
 
 ```
 
-### 3. Run Engine
+### 2. Run the Bot
 
-Execute the bot using the generated configuration.
+You only need to run one command. The script handles both **compilation** (Excel -> JSON) and **execution**.
 
 ```bash
-python main.py configs/accounting/invoice_bot.json
+python main.py
 
 ```
+
+**What happens inside:**
+
+1. **Bridge Phase:** Checks `specs/`. If Excel files are found, it compiles them into optimized JSON files in `configs/`.
+2. **Engine Phase:** Loads the JSON config and connects to Outlook.
+3. **Processing:**
+* It fetches emails.
+* Passes `.msg` files to `mail_workflow`.
+* `mail_workflow` reads the business rules JSON.
+* It executes OCR on PDFs and saves Excel files as defined in your rules.
+
+
+
+---
+
+## ⚡ Quick Start (Jupyter Notebook)
+
+Open **`sample copy.ipynb`** (or `quick_run.ipynb`) to visualize the flow step-by-step.
+
+* **Step 1:** Create mock Excel specs.
+* **Step 2:** Compile them to JSON (observe the `configs/` folder creation).
+* **Step 3:** Run the Engine and verify the output in `data/`.

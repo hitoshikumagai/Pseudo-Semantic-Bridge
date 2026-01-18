@@ -182,5 +182,8 @@ cython_debug/
 
 
 # User Data & Runtime Artifacts
-/data/*                # exclude data directory
-!/data/.gitkeep       # keep directory
+# (exclude data directory)
+/data/*
+
+# (keep directory)
+!/data/.gitkeep

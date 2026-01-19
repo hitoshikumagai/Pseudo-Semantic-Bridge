@@ -28,19 +28,19 @@ The system consists of distinct layers, now enhanced with a **Workflow Layer** f
 ```mermaid
 graph TD
     subgraph Design Phase [Layer 1 & 2: Bridge]
-        A1[specs/system_spec.xlsx] -->|Compile| B[Builder (Facade)]
+        A1[specs/system_spec.xlsx] -->|Compile| B["Builder (Facade)"]
         A2[specs/business_rules.xlsx] -->|Compile| B
         B -->|Generate| C1[configs/system.json]
         B -->|Generate| C2[configs/rules.json]
     end
 
     subgraph Runtime Phase [Layer 3 & 4: Engine]
-        D[Generic Engine] -->|Load| C1
+        C1 -->|Load| D[Generic Engine]
         D -->|Dispatch| E{Router}
         E -->|extension=.pdf| F[Handler: OCR]
-        E -->|extension=.msg| G[Workflow: Mail Router]
+        E -->|extension=.msg| G[Workflow: Mail Router]        
+        C2 -->|Load| G
         
-        G -->|Load| C2
         G -->|Business Logic| H[Handler: Save / OCR / Unzip]
     end
 

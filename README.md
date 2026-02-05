@@ -63,6 +63,7 @@ project_root/
     ├── bridge/              # Excel Parser & Builder
     ├── engine/              # Generic Dispatcher
     └── catalog/
+        ├── agents/          # API-driven extensions (custom scripts)
         ├── workflows/       # Complex Logic (e.g., Mail Routing)
         └── handlers/        # Atomic Actions (OCR, Save, Unzip)
 
@@ -94,6 +95,66 @@ Supports defining different actions for different file types within the same tas
 | 請求書 | INVOICE | True | **.pdf** | **ocr_process** | `{"lang": "jpn"}` |
 | 請求書 | INVOICE | True | **.xlsx** | **save_only** | `{}` |
 | 日報 | REPORT | False | * | save_process | `{}` |
+
+---
+
+## 🤖 Agents (API-Driven Extensions)
+
+Agents are **project-bundled scripts** that can call external APIs.  
+They are registered like normal processors and referenced by `Processor ID`.
+
+### Add a New Agent
+
+1. Create a file under `src/catalog/agents/` and register it:
+
+```python
+from src.catalog import register_processor
+
+@register_processor("agent_external_api")
+def external_api_agent(item, output_dir, params):
+    # call external API here
+    pass
+```
+
+2. Ensure `src/catalog/agents/__init__.py` imports your agent module.
+
+3. Use the agent ID in Excel `Processor ID`:
+
+| Extension | Processor ID | Parameters (JSON) |
+| --- | --- | --- |
+| `.msg` | `agent_external_api` | `{"model": "gpt-4.1", "prompt": "Summarize: {item_name}"}` |
+
+### Minimal Parameters Example
+
+```json
+{
+  "model": "gpt-4.1",
+  "prompt": "Summarize: {item_name}",
+  "token_env": "OPENAI_API_KEY",
+  "save_output": true
+}
+```
+
+Notes:
+- This agent uses the OpenAI official SDK (Python).
+- It reads the API key from `OPENAI_API_KEY` by default.
+
+---
+
+## 🐍 Conda Setup
+
+This project assumes **Anaconda / Miniconda**.
+
+```bash
+conda env create -f environment.yml
+conda activate pseudo-semantic-bridge
+```
+
+### Run Tests
+
+```bash
+pytest -q
+```
 
 ---
 

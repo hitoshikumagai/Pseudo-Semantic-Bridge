@@ -1,0 +1,42 @@
+import os
+import sys
+import types
+
+from src.catalog.agents.external_api_agent import external_api_agent
+
+
+class DummyItem:
+    name = "dummy.msg"
+    extension = ".msg"
+
+
+def test_external_api_agent_openai_sdk(monkeypatch, tmp_path):
+    class DummyResponses:
+        def __init__(self):
+            self.last = None
+
+        def create(self, model, input):
+            self.last = {"model": model, "input": input}
+            return types.SimpleNamespace(output_text="ok")
+
+    class DummyOpenAI:
+        def __init__(self, api_key):
+            self.api_key = api_key
+            self.responses = DummyResponses()
+
+    dummy_module = types.ModuleType("openai")
+    dummy_module.OpenAI = DummyOpenAI
+    sys.modules["openai"] = dummy_module
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    params = {
+        "model": "gpt-4.1",
+        "prompt": "Summarize: {item_name}",
+        "save_output": True,
+    }
+    external_api_agent(DummyItem(), str(tmp_path), params)
+
+    out_file = tmp_path / "dummy.msg.openai.txt"
+    assert out_file.exists()
+    assert out_file.read_text(encoding="utf-8") == "ok"

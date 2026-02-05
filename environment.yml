@@ -1,0 +1,15 @@
+name: pseudo-semantic-bridge
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pandas>=2.0.0
+  - openpyxl>=3.1.0
+  - pydantic>=2.0.0
+  - pytest>=7.4.0
+  - jupyter>=1.0.0
+  - pip
+  - pip:
+      - openai>=1.0.0
+      - pywin32>=306

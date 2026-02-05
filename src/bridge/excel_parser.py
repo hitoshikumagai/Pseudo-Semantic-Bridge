@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 if os.getcwd() not in sys.path:
     sys.path.append(os.getcwd())
 
-from src.schema.definitions import OutlookConfig, AttachmentRule, ProcessorType
+from src.schema.definitions import OutlookConfig, AttachmentRule
 
 def parse_excel_spec(excel_path: str) -> OutlookConfig:
     """

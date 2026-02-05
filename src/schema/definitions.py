@@ -10,13 +10,14 @@ class ProcessorType(str, Enum):
 
 class AttachmentRule(BaseModel):
     extension: str
-    processor_id: ProcessorType
-    # ★New: 振る舞いを制御するためのパラメータ (デフォルトは空の辞書)
+    # Use string to allow extension beyond fixed ProcessorType
+    processor_id: str
+    # Parameters to control behavior (defaults to empty dict)
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 class OutlookConfig(BaseModel):
     job_name: str
-    version: str = "2.0"  # バージョンアップ
+    version: str = "2.0"  # Version bump
     domain: str
     search_keywords: List[str]
     destination_path: str

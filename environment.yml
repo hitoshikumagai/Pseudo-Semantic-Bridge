@@ -13,4 +13,4 @@ dependencies:
   - pip
   - pip:
       - openai>=1.0.0
-      - pywin32>=306
+      - pywin32>=306; platform_system == "Windows"

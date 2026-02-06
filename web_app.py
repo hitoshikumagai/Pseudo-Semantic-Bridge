@@ -63,6 +63,39 @@ st.markdown(
         border-radius: 12px;
         border: 1px solid #e5e7eb;
     }
+    .psb-idea-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+    }
+    .psb-idea-card {
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 14px 16px;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+    }
+    .psb-idea-title {
+        font-weight: 600;
+        margin: 0 0 6px 0;
+    }
+    .psb-idea-meta {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 10px;
+    }
+    .psb-pill {
+        display: inline-block;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #f3f4f6;
+        color: #111827;
+        margin-right: 6px;
+    }
+    .psb-pill.high { background: #fee2e2; color: #991b1b; }
+    .psb-pill.medium { background: #fef3c7; color: #92400e; }
+    .psb-pill.low { background: #e0f2fe; color: #075985; }
     .psb-label {
         font-size: 12px;
         letter-spacing: 0.08em;
@@ -90,7 +123,7 @@ st.markdown(
 
 st.write("")
 
-tabs = st.tabs(["Rules", "AI Rule Builder", "Run"])
+tabs = st.tabs(["Rules", "AI Rule Builder", "Quality Feedback", "Run"])
 
 if "rules" not in st.session_state:
     existing_rules = load_rules(RULES_PATH)
@@ -228,6 +261,73 @@ with tabs[1]:
                 st.experimental_rerun()
 
 with tabs[2]:
+    st.markdown("<div class='psb-label'>Quality Intake</div>", unsafe_allow_html=True)
+    st.write("受付フォームで目的を整理し、AIがワークフロー化/スキル化を提案します。")
+
+    col_a, col_b = st.columns([2, 1])
+    with col_a:
+        app_context = st.text_input(
+            "対象アプリ/領域",
+            value="メール",
+            help="例: メール, 受発注, 請求書管理",
+        )
+        goal = st.text_area(
+            "何がしたい？（目的）",
+            placeholder="例: 添付の写真から文字抽出して、処理フローに組み込みたい",
+            height=100,
+        )
+        scope = st.text_area(
+            "想定シナリオ/制約",
+            placeholder="例: まずは単体で出来栄えを見たい。機密情報あり。",
+            height=100,
+        )
+        success = st.text_area(
+            "成功条件/評価基準",
+            placeholder="例: 95%の抽出精度、3秒以内の処理",
+            height=80,
+        )
+
+    with col_b:
+        st.markdown("<div class='psb-label'>進め方</div>", unsafe_allow_html=True)
+        path = st.radio(
+            "どの形で検証する？",
+            ["まずは単体の出来栄えを見る", "ワークフローに組み込みたい"],
+        )
+        customization = st.radio(
+            "ユーザーが自分でやってよい範囲",
+            ["簡単な開発/カスタムはユーザーに任せる", "基本は運用チームで対応"],
+        )
+        st.markdown("<div class='psb-label' style='margin-top:12px'>任意情報</div>", unsafe_allow_html=True)
+        artifacts = st.text_area(
+            "参考情報（任意）",
+            placeholder="例: 既存ルール、ログ、サンプル画像の説明",
+            height=120,
+        )
+
+    col_c, col_d = st.columns([1, 1])
+    with col_c:
+        if st.button("受付内容を保存"):
+            st.session_state["quality_intake"] = {
+                "app_context": app_context,
+                "goal": goal,
+                "scope": scope,
+                "success": success,
+                "path": path,
+                "customization": customization,
+                "artifacts": artifacts,
+            }
+            st.success("受付内容を保存しました。")
+    with col_d:
+        if st.button("AIで整理（準備）", type="primary"):
+            st.session_state["quality_intake_ready"] = True
+
+    st.write("")
+    st.markdown("<div class='psb-label'>AI解析結果（予定）</div>", unsafe_allow_html=True)
+    st.caption("次のフェーズで生成AIを接続し、要約・ワークフロー案・スキル案を表示します。")
+    if st.session_state.get("quality_intake"):
+        st.json(st.session_state["quality_intake"])
+
+with tabs[3]:
     st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='psb-card'>"

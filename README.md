@@ -98,6 +98,22 @@ Supports defining different actions for different file types within the same tas
 
 ---
 
+## 🧩 Intent IR (v1)
+
+To bridge natural-language intent and executable steps, the project now includes a JSON-based intermediate representation (IR).
+
+- JSON Schema: `specs/schema/intent_spec_v1.schema.json`
+- Accounting sample: `specs/accounting/invoice_intent_spec.sample.json`
+
+Core fields:
+- `spec_id`, `spec_version`, `domain`, `intent`
+- `inputs`
+- `steps[]` (`id`, `action`, `params`)
+- `verification` (`required_fields`, `min_quality_score`)
+- `fallback` (`on_failure`)
+
+---
+
 ## 🤖 Agents (API-Driven Extensions)
 
 Agents are **project-bundled scripts** that can call external APIs.  

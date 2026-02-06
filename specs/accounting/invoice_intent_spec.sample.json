@@ -1,0 +1,51 @@
+{
+  "spec_id": "spec-20260206-001",
+  "spec_version": "1.0",
+  "domain": "accounting_mail_invoice",
+  "intent": "請求書メールをOCRして保存し、処理結果を検証する",
+  "inputs": {
+    "mailbox": "accounting@company.com",
+    "lookback_days": 7
+  },
+  "steps": [
+    {
+      "id": "s1",
+      "action": "fetch_mails",
+      "params": {
+        "subject_filter": "Invoice"
+      }
+    },
+    {
+      "id": "s2",
+      "action": "extract_attachment",
+      "params": {
+        "ext": ".pdf"
+      }
+    },
+    {
+      "id": "s3",
+      "action": "ocr_process",
+      "params": {
+        "lang": "jpn"
+      }
+    },
+    {
+      "id": "s4",
+      "action": "save_result",
+      "params": {
+        "destination": "data/out"
+      }
+    }
+  ],
+  "verification": {
+    "required_fields": [
+      "invoice_number",
+      "amount",
+      "date"
+    ],
+    "min_quality_score": 0.8
+  },
+  "fallback": {
+    "on_failure": "route_manual_review"
+  }
+}

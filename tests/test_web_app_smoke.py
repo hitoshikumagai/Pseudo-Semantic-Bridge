@@ -62,6 +62,9 @@ class _FakeStreamlit(types.ModuleType):
     def caption(self, *args, **kwargs):
         self.calls.append(("caption",))
 
+    def metric(self, *args, **kwargs):
+        self.calls.append(("metric",))
+
     def dataframe(self, *args, **kwargs):
         self.calls.append(("dataframe",))
 
@@ -111,6 +114,17 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.load_jsonl_runs = lambda _path: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     fake_app_logic.save_rules = lambda *_args, **_kwargs: None
+    fake_app_logic.summarize_run_window = (
+        lambda runs, start_index=0: {
+            "total": max(len(runs) - start_index, 0),
+            "success": 0,
+            "error": 0,
+            "with_output": 0,
+            "latest_error": None,
+            "latest_timestamp": None,
+            "workflows": [],
+        }
+    )
     fake_app_logic.generate_intent_spec = (
         lambda **_kwargs: (
             {

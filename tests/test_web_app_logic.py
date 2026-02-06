@@ -380,3 +380,30 @@ def test_generate_intent_spec_ai_mode_without_key_falls_back(monkeypatch):
     assert source == "template"
     assert "OPENAI_API_KEY not found" in error
     assert spec["spec_version"] == "1.0"
+
+
+def test_summarize_run_window_counts_status_and_error():
+    runs = [
+        {"workflow": "engine", "timestamp": "2026-02-06T11:10:01Z", "result": {"status": "success", "output_path": None}},
+        {"workflow": "engine", "timestamp": "2026-02-06T11:10:02Z", "result": {"status": "error", "error": "boom"}},
+        {"workflow": "mail_workflow", "timestamp": "2026-02-06T11:10:03Z", "result": {"status": "success", "output_path": "data/out/a.txt"}},
+    ]
+    summary = app_logic.summarize_run_window(runs, start_index=0)
+    assert summary["total"] == 3
+    assert summary["success"] == 2
+    assert summary["error"] == 1
+    assert summary["with_output"] == 1
+    assert summary["latest_error"] == "boom"
+    assert summary["latest_timestamp"] == "2026-02-06T11:10:03Z"
+    assert summary["workflows"] == ["engine", "mail_workflow"]
+
+
+def test_summarize_run_window_respects_start_index():
+    runs = [
+        {"workflow": "engine", "result": {"status": "success"}},
+        {"workflow": "engine", "result": {"status": "error", "error": "x"}},
+    ]
+    summary = app_logic.summarize_run_window(runs, start_index=1)
+    assert summary["total"] == 1
+    assert summary["success"] == 0
+    assert summary["error"] == 1

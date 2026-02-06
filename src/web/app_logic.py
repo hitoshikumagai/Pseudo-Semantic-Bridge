@@ -2,6 +2,7 @@ import json
 import os
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
@@ -26,6 +27,7 @@ def load_system_config(path: Path) -> OutlookConfig:
 
 def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter_factory, engine_factory):
     jobs.setdefault(job_id, {"status": "queued"})
+    jobs[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
     jobs[job_id]["status"] = "running"
     try:
         build_fn()
@@ -36,6 +38,48 @@ def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter
         jobs[job_id]["status"] = "done"
     except Exception as e:
         jobs[job_id]["status"] = f"error: {e}"
+    finally:
+        jobs[job_id]["ended_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def summarize_run_window(
+    runs: List[Dict[str, Any]],
+    start_index: int = 0,
+) -> Dict[str, Any]:
+    scoped_runs = runs[max(start_index, 0) :]
+    total = len(scoped_runs)
+    success = 0
+    error = 0
+    with_output = 0
+    latest_error: Optional[str] = None
+    workflows: set[str] = set()
+    latest_timestamp: Optional[str] = None
+
+    for run in scoped_runs:
+        result = run.get("result") or {}
+        status = str(result.get("status") or "")
+        if status == "success":
+            success += 1
+        elif status == "error":
+            error += 1
+            if result.get("error"):
+                latest_error = str(result.get("error"))
+        if result.get("output_path"):
+            with_output += 1
+        if run.get("workflow"):
+            workflows.add(str(run["workflow"]))
+        if run.get("timestamp"):
+            latest_timestamp = str(run["timestamp"])
+
+    return {
+        "total": total,
+        "success": success,
+        "error": error,
+        "with_output": with_output,
+        "latest_error": latest_error,
+        "latest_timestamp": latest_timestamp,
+        "workflows": sorted(workflows),
+    }
 
 
 def start_job(jobs: dict, run_fn):

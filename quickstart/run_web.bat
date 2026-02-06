@@ -31,8 +31,21 @@ if not defined CONDA_CMD (
 )
 
 pushd "%REPO_ROOT%"
-call :run_conda env list 2>nul | findstr /R /C:"^%ENV_NAME% " >nul
+set "ENV_LIST_FILE=%TEMP%\psb_conda_env_list_%RANDOM%%RANDOM%.txt"
+call :run_conda env list > "%ENV_LIST_FILE%" 2>nul
 if errorlevel 1 (
+  echo [ERROR] Failed to query conda environments.
+  if exist "%ENV_LIST_FILE%" del /q "%ENV_LIST_FILE%" >nul 2>nul
+  popd
+  pause
+  exit /b 1
+)
+
+findstr /R /B /C:"%ENV_NAME% " "%ENV_LIST_FILE%" >nul
+set "ENV_EXISTS=%ERRORLEVEL%"
+if exist "%ENV_LIST_FILE%" del /q "%ENV_LIST_FILE%" >nul 2>nul
+
+if not "%ENV_EXISTS%"=="0" (
   echo [INFO] Creating conda environment "%ENV_NAME%" from environment.yml...
   call :run_conda env create -f environment.yml
   if errorlevel 1 (

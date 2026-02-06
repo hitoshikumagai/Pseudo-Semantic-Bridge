@@ -15,6 +15,7 @@ from src.web.app_logic import (
     save_rules,
     start_job,
     summarize_quality,
+    summarize_run_window,
 )
 
 
@@ -471,6 +472,7 @@ with tabs[4]:
 
     st.write("")
     if st.button("Run Pipeline"):
+        baseline_count = len(load_jsonl_runs(LOGS_PATH))
         current_spec = st.session_state.get("intent_spec") or {}
 
         def _run(current_job_id: str):
@@ -490,6 +492,7 @@ with tabs[4]:
         if current_spec.get("spec_id"):
             jobs[job_id]["spec_id"] = current_spec["spec_id"]
             jobs[job_id]["spec_source"] = st.session_state.get("intent_spec_source")
+        jobs[job_id]["log_start_index"] = baseline_count
         st.session_state["last_job_id"] = job_id
 
     st.write("")
@@ -501,6 +504,31 @@ with tabs[4]:
         )
     else:
         st.caption("Current spec: not generated yet")
+
+    last_job_id = st.session_state.get("last_job_id")
+    if last_job_id and last_job_id in jobs:
+        current_runs = load_jsonl_runs(LOGS_PATH)
+        last_job = jobs[last_job_id]
+        summary = summarize_run_window(
+            current_runs,
+            start_index=int(last_job.get("log_start_index", 0)),
+        )
+        st.markdown("<div class='psb-label'>Last Run Summary</div>", unsafe_allow_html=True)
+        s1, s2, s3, s4 = st.columns(4)
+        with s1:
+            st.metric("Processed", summary["total"])
+        with s2:
+            st.metric("Success", summary["success"])
+        with s3:
+            st.metric("Error", summary["error"])
+        with s4:
+            st.metric("Artifacts", summary["with_output"])
+        if summary["workflows"]:
+            st.caption(f"Workflows: {', '.join(summary['workflows'])}")
+        if summary["latest_timestamp"]:
+            st.caption(f"Latest log time: {summary['latest_timestamp']}")
+        if summary["latest_error"]:
+            st.warning(f"Latest error: {summary['latest_error']}")
 
     st.markdown("<div class='psb-label'>Job Status</div>", unsafe_allow_html=True)
     if not jobs:

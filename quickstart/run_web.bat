@@ -4,6 +4,7 @@ setlocal enableextensions
 set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%.."
 set "CONDA_CMD="
+set "ENV_NAME=pseudo-semantic-bridge"
 
 where conda >nul 2>nul
 if not errorlevel 1 set "CONDA_CMD=conda"
@@ -30,7 +31,20 @@ if not defined CONDA_CMD (
 )
 
 pushd "%REPO_ROOT%"
-call "%CONDA_CMD%" run -n pseudo-semantic-bridge streamlit run web_app.py
+call :run_conda env list 2>nul | findstr /R /C:"^%ENV_NAME% " >nul
+if errorlevel 1 (
+  echo [INFO] Creating conda environment "%ENV_NAME%" from environment.yml...
+  call :run_conda env create -f environment.yml
+  if errorlevel 1 (
+    echo.
+    echo [ERROR] Failed to create conda environment.
+    popd
+    pause
+    exit /b 1
+  )
+)
+
+call :run_conda run -n %ENV_NAME% streamlit run web_app.py
 set "EXIT_CODE=%ERRORLEVEL%"
 popd
 
@@ -42,3 +56,11 @@ if not "%EXIT_CODE%"=="0" (
 )
 
 exit /b 0
+
+:run_conda
+if /I "%CONDA_CMD%"=="conda" (
+  call conda %*
+) else (
+  call "%CONDA_CMD%" %*
+)
+exit /b %ERRORLEVEL%

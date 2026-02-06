@@ -111,6 +111,22 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.load_jsonl_runs = lambda _path: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     fake_app_logic.save_rules = lambda *_args, **_kwargs: None
+    fake_app_logic.generate_intent_spec = (
+        lambda **_kwargs: (
+            {
+                "spec_id": "spec-smoke",
+                "spec_version": "1.0",
+                "domain": "accounting_mail_invoice",
+                "intent": "smoke",
+                "inputs": {},
+                "steps": [{"id": "s1", "action": "fetch_mails", "params": {}}],
+                "verification": {"required_fields": [], "min_quality_score": 0.8},
+                "fallback": {"on_failure": "route_manual_review"},
+            },
+            None,
+            "template",
+        )
+    )
 
     def run_engine_job(jobs, job_id, build_fn, config_path, adapter_factory, engine_factory):
         tracker["run_engine_job"] += 1

@@ -1,10 +1,11 @@
 import json
+import os
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
 
-from src.schema.definitions import OutlookConfig
+from src.schema.definitions import IntentSpecification, OutlookConfig
 
 
 def load_rules(path: Path):
@@ -327,3 +328,114 @@ def run_quality_agents(
         "rules_error": rules_error,
         "results": results,
     }
+
+
+def _build_template_steps(goal: str) -> List[Dict[str, Any]]:
+    lowered = (goal or "").lower()
+    if "請求" in goal or "invoice" in lowered:
+        return [
+            {"id": "s1", "action": "fetch_mails", "params": {"subject_filter": "Invoice"}},
+            {"id": "s2", "action": "extract_attachment", "params": {"ext": ".pdf"}},
+            {"id": "s3", "action": "ocr_process", "params": {"lang": "jpn"}},
+            {"id": "s4", "action": "save_result", "params": {"destination": "data/out"}},
+        ]
+    return [
+        {"id": "s1", "action": "fetch_inputs", "params": {}},
+        {"id": "s2", "action": "transform", "params": {}},
+        {"id": "s3", "action": "save_result", "params": {"destination": "data/out"}},
+    ]
+
+
+def _build_template_spec(
+    app_context: str,
+    goal: str,
+    scope: str,
+    success: str,
+    artifacts: str,
+) -> Dict[str, Any]:
+    return {
+        "spec_id": f"spec-{int(time.time())}",
+        "spec_version": "1.0",
+        "domain": "accounting_mail_invoice",
+        "intent": goal or "Define processing workflow from user intent.",
+        "inputs": {
+            "app_context": app_context,
+            "scope": scope,
+            "artifacts": artifacts,
+        },
+        "steps": _build_template_steps(goal),
+        "verification": {
+            "required_fields": ["invoice_number", "amount", "date"] if ("請求" in goal or "invoice" in goal.lower()) else [],
+            "min_quality_score": 0.8,
+            "success_criteria_note": success,
+        },
+        "fallback": {"on_failure": "route_manual_review"},
+    }
+
+
+def _generate_spec_with_openai(prompt_text: str, model: str) -> Dict[str, Any]:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    completion = client.chat.completions.create(
+        model=model,
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You generate strict JSON only. Output a valid intent spec object with fields: "
+                    "spec_id, spec_version='1.0', domain, intent, inputs, steps, verification, fallback. "
+                    "steps must have unique ids."
+                ),
+            },
+            {"role": "user", "content": prompt_text},
+        ],
+    )
+    content = completion.choices[0].message.content or "{}"
+    return json.loads(content)
+
+
+def generate_intent_spec(
+    app_context: str,
+    goal: str,
+    scope: str,
+    success: str,
+    artifacts: str,
+    use_ai: bool = False,
+    model: str = "gpt-4o-mini",
+) -> Tuple[Dict[str, Any], Optional[str], str]:
+    template_spec = _build_template_spec(app_context, goal, scope, success, artifacts)
+
+    if not use_ai:
+        validated = IntentSpecification(**template_spec)
+        return validated.model_dump(), None, "template"
+
+    if not os.getenv("OPENAI_API_KEY"):
+        validated = IntentSpecification(**template_spec)
+        return validated.model_dump(), "OPENAI_API_KEY not found. Generated template spec instead.", "template"
+
+    prompt_text = (
+        "Create an intent spec JSON for this request.\n"
+        f"app_context: {app_context}\n"
+        f"goal: {goal}\n"
+        f"scope: {scope}\n"
+        f"success: {success}\n"
+        f"artifacts: {artifacts}\n"
+    )
+
+    try:
+        ai_spec = _generate_spec_with_openai(prompt_text, model=model)
+        if "spec_id" not in ai_spec:
+            ai_spec["spec_id"] = f"spec-{int(time.time())}"
+        ai_spec["spec_version"] = "1.0"
+        validated = IntentSpecification(**ai_spec)
+        return validated.model_dump(), None, "llm"
+    except Exception as exc:
+        validated = IntentSpecification(**template_spec)
+        return (
+            validated.model_dump(),
+            f"AI generation failed ({exc}). Generated template spec instead.",
+            "template",
+        )

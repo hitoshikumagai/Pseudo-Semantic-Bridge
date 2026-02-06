@@ -350,3 +350,33 @@ def test_run_quality_agents_aggregates_results_and_can_toggle_agents():
         run_skill=True,
     )
     assert [row["agent"] for row in only_skill["results"]] == ["skill_suggestion"]
+
+
+def test_generate_intent_spec_template_mode():
+    spec, error, source = app_logic.generate_intent_spec(
+        app_context="メール",
+        goal="請求書メールをOCRして保存",
+        scope="過去7日",
+        success="抽出率95%",
+        artifacts="サンプルなし",
+        use_ai=False,
+    )
+    assert error is None
+    assert source == "template"
+    assert spec["spec_version"] == "1.0"
+    assert spec["steps"][0]["action"] == "fetch_mails"
+
+
+def test_generate_intent_spec_ai_mode_without_key_falls_back(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    spec, error, source = app_logic.generate_intent_spec(
+        app_context="メール",
+        goal="請求書の処理",
+        scope="標準運用",
+        success="欠損なし",
+        artifacts="",
+        use_ai=True,
+    )
+    assert source == "template"
+    assert "OPENAI_API_KEY not found" in error
+    assert spec["spec_version"] == "1.0"

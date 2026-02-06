@@ -122,22 +122,24 @@ def external_api_agent(item, output_dir, params):
 
 | Extension | Processor ID | Parameters (JSON) |
 | --- | --- | --- |
-| `.msg` | `agent_external_api` | `{"model": "gpt-4.1", "prompt": "Summarize: {item_name}"}` |
+| `.msg` | `agent_external_api` | `{"model": "gpt-4.1", "prompt": "Summarize: {input_text}", "input_mode": "body"}` |
 
 ### Minimal Parameters Example
 
 ```json
 {
   "model": "gpt-4.1",
-  "prompt": "Summarize: {item_name}",
+  "prompt": "Summarize: {input_text}",
   "token_env": "OPENAI_API_KEY",
-  "save_output": true
+  "save_output": true,
+  "input_mode": "body"
 }
 ```
 
 Notes:
 - This agent uses the OpenAI official SDK (Python).
 - It reads the API key from `OPENAI_API_KEY` by default.
+- Use `{input_text}` in the prompt to summarize the email body.
 
 ---
 

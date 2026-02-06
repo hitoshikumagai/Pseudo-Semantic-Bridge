@@ -12,6 +12,18 @@ def _resolve_api_key(token_env: str) -> Optional[str]:
     return os.environ.get("OPENAI_API_KEY")
 
 
+def _extract_input_text(item, prefer_body: bool) -> str:
+    if prefer_body:
+        if hasattr(item, "body") and getattr(item, "body"):
+            return getattr(item, "body")
+        raw = getattr(item, "_raw_item", None)
+        if raw is not None and hasattr(raw, "Body"):
+            return getattr(raw, "Body") or ""
+        if raw is not None and hasattr(raw, "HTMLBody"):
+            return getattr(raw, "HTMLBody") or ""
+    return item.name
+
+
 @register_processor("agent_external_api")
 def external_api_agent(item, output_dir, params):
     """
@@ -19,9 +31,10 @@ def external_api_agent(item, output_dir, params):
     params example:
       {
         "model": "gpt-4.1",
-        "prompt": "Summarize: {item_name}",
+        "prompt": "Summarize: {input_text}",
         "token_env": "OPENAI_API_KEY",
-        "save_output": true
+        "save_output": true,
+        "input_mode": "body"
       }
     """
     try:
@@ -31,9 +44,10 @@ def external_api_agent(item, output_dir, params):
         return
 
     model = str(params.get("model", "gpt-4.1"))
-    prompt_template = str(params.get("prompt", "Summarize: {item_name}"))
+    prompt_template = str(params.get("prompt", "Summarize: {input_text}"))
     token_env = str(params.get("token_env", "OPENAI_API_KEY")).strip()
     save_output = bool(params.get("save_output", True))
+    input_mode = str(params.get("input_mode", "body")).strip().lower()
 
     api_key = _resolve_api_key(token_env)
     if not api_key:
@@ -42,9 +56,11 @@ def external_api_agent(item, output_dir, params):
 
     client = OpenAI(api_key=api_key)
 
+    input_text = _extract_input_text(item, prefer_body=(input_mode == "body"))
     prompt = prompt_template.format(
         item_name=item.name,
         item_extension=item.extension,
+        input_text=input_text,
     )
 
     try:

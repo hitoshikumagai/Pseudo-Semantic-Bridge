@@ -1,6 +1,11 @@
 import os
 import json
+import time
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from src.catalog import register_processor
+from src.telemetry.run_logger import append_run
 
 from src.catalog.handlers.document import pdf_to_text_ocr
 from src.catalog.handlers.basic import save_only
@@ -65,10 +70,94 @@ def mail_workflow(*args, **kwargs):
     if require_attachment and not has_attachment:
         return
 
+    def log_run(attachment_ext: str, action_executed: str = None):
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        run_id = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+        record = {
+            "run_id": run_id,
+            "timestamp": timestamp,
+            "workflow": "mail_workflow",
+            "processor_id": "mail_workflow",
+            "action_id": action_id,
+            "input": {
+                "subject": mail_subject,
+                "has_attachment": has_attachment,
+                "attachment_ext": attachment_ext,
+            },
+            "result": {
+                "status": "success",
+                "output_path": None,
+                "error": None,
+                "action_executed": action_executed,
+            },
+            "quality": {
+                "label": None,
+                "score": None,
+                "notes": None,
+                "feedback_by": None,
+                "feedback_at": None,
+            },
+        }
+        append_run(record)
+
+    def get_child_ext(child) -> str:
+        ext = getattr(child, "extension", None)
+        if not ext:
+            _, ext = os.path.splitext(getattr(child, "name", "") or "")
+        return (ext or "").lower()
+
     if has_attachment:
         target_func = PROCESSOR_MAP.get(action_id, save_only)
         for child in children:
-            target_func(child, final_output_dir, params)
+            try:
+                target_func(child, final_output_dir, params)
+                log_run(get_child_ext(child), action_executed=action_id)
+            except Exception as e:
+                error_record = {
+                    "run_id": f"{int(time.time() * 1000)}-{uuid4().hex[:8]}",
+                    "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "workflow": "mail_workflow",
+                    "processor_id": "mail_workflow",
+                    "action_id": action_id,
+                    "input": {
+                        "subject": mail_subject,
+                        "has_attachment": has_attachment,
+                        "attachment_ext": get_child_ext(child),
+                    },
+                    "result": {"status": "error", "output_path": None, "error": str(e)},
+                    "quality": {
+                        "label": None,
+                        "score": None,
+                        "notes": None,
+                        "feedback_by": None,
+                        "feedback_at": None,
+                    },
+                }
+                append_run(error_record)
     else:
-        item.save_to(final_output_dir)
-        print(f"      📝 Saved body: {item.name}")
+        try:
+            item.save_to(final_output_dir)
+            print(f"      📝 Saved body: {item.name}")
+            log_run("", action_executed="save_only")
+        except Exception as e:
+            error_record = {
+                "run_id": f"{int(time.time() * 1000)}-{uuid4().hex[:8]}",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "workflow": "mail_workflow",
+                "processor_id": "mail_workflow",
+                "action_id": action_id,
+                "input": {
+                    "subject": mail_subject,
+                    "has_attachment": has_attachment,
+                    "attachment_ext": "",
+                },
+                "result": {"status": "error", "output_path": None, "error": str(e)},
+                "quality": {
+                    "label": None,
+                    "score": None,
+                    "notes": None,
+                    "feedback_by": None,
+                    "feedback_at": None,
+                },
+            }
+            append_run(error_record)

@@ -111,3 +111,79 @@ def test_run_engine_job_sets_error(tmp_path):
     )
 
     assert jobs["job-1"]["status"].startswith("error:")
+
+
+def test_load_jsonl_runs_skips_invalid_lines(tmp_path):
+    log_path = tmp_path / "runs.jsonl"
+    log_path.write_text(
+        "\n".join(
+            [
+                '{"run_id":"1","result":{"status":"success"}}',
+                "not-json",
+                "",
+                '{"run_id":"2","result":{"status":"fail"}}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    runs = app_logic.load_jsonl_runs(log_path)
+    assert [run["run_id"] for run in runs] == ["1", "2"]
+
+
+def test_summarize_quality_counts_success_and_quality_labels():
+    runs = [
+        {"result": {"status": "success"}, "quality": {"label": "OK"}},
+        {"result": {"status": "success"}, "quality": {"label": "NG"}},
+        {"result": {"status": "fail"}, "quality": {"score": 0.9}},
+        {"result": {"status": "fail"}, "quality": {}},
+    ]
+
+    summary = app_logic.summarize_quality(runs)
+    assert summary["total"] == 4
+    assert summary["success"] == 2
+    assert summary["quality_labeled"] == 3
+    assert summary["quality_ok"] == 2
+
+
+def test_propose_rule_candidates_filters_by_quality_and_samples():
+    runs = [
+        {
+            "input": {"subject": "請求書", "attachment_ext": ".pdf", "has_attachment": True},
+            "action_id": "ocr_process",
+            "result": {"status": "success"},
+            "quality": {"label": "ok"},
+        },
+        {
+            "input": {"subject": "請求書", "attachment_ext": ".pdf", "has_attachment": True},
+            "action_id": "ocr_process",
+            "result": {"status": "success"},
+            "quality": {"label": "ok"},
+        },
+        {
+            "input": {"subject": "請求書", "attachment_ext": ".pdf", "has_attachment": True},
+            "action_id": "ocr_process",
+            "result": {"status": "success"},
+            "quality": {"label": "ng"},
+        },
+        {
+            "input": {"subject": "日報", "attachment_ext": ".xlsx", "has_attachment": True},
+            "action_id": "save_only",
+            "result": {"status": "success"},
+            "quality": {"label": "ok"},
+        },
+    ]
+
+    meta, candidates = app_logic.propose_rule_candidates(
+        runs,
+        min_samples=3,
+        min_quality_rate=0.6,
+    )
+
+    assert len(meta) == 1
+    assert meta[0]["subject_filter"] == "請求書"
+    assert meta[0]["quality_rate"] >= 0.6
+
+    assert len(candidates) == 1
+    assert candidates[0]["action_id"] == "ocr_process"
+    assert candidates[0]["target_ext"] == ".pdf"

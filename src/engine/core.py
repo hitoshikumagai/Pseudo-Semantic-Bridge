@@ -1,6 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+import time
+from uuid import uuid4
+
 from src.schema.definitions import OutlookConfig
 from src.catalog import get_processor
+from src.telemetry.run_logger import append_run
 
 class GenericEtlEngine:
     def __init__(self, config: OutlookConfig, adapter):
@@ -85,28 +90,86 @@ class GenericEtlEngine:
 
         print(f"   ⚙️  Running Rule [{processor_id}] for: {item.name} ({ext})")
 
-        try:
-            handler = get_processor(processor_id)
+        def build_record():
+            timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            run_id = f"{int(time.time() * 1000)}-{uuid4().hex[:8]}"
+            has_attachment = False
+            if item.is_container:
+                try:
+                    has_attachment = len(item.get_children()) > 0
+                except Exception:
+                    has_attachment = False
+            return {
+                "run_id": run_id,
+                "timestamp": timestamp,
+                "workflow": "engine",
+                "processor_id": processor_id,
+                "action_id": processor_id,
+                "input": {
+                    "subject": item.name,
+                    "has_attachment": has_attachment,
+                    "attachment_ext": ext,
+                },
+                "result": {"status": None, "output_path": None, "error": None},
+                "quality": {
+                    "label": None,
+                    "score": None,
+                    "notes": None,
+                    "feedback_by": None,
+                    "feedback_at": None,
+                },
+            }
 
-            params = target_rule.parameters or {}
-            max_concurrency = int(params.get("max_concurrency", 1)) if params else 1
-            if self._executor and max_concurrency > 1:
-                future = self._executor.submit(
-                    handler,
-                    item,
-                    self.config.destination_path,
-                    params,
-                )
-                self._futures.append(future)
-            else:
+        def run_and_log():
+            record = build_record()
+            try:
                 handler(
                     item,
                     self.config.destination_path,
                     params,
                 )
+                record["result"]["status"] = "success"
+                append_run(record)
+            except Exception as e:
+                record["result"]["status"] = "error"
+                record["result"]["error"] = str(e)
+                append_run(record)
+                raise
+
+        try:
+            handler = get_processor(processor_id)
+            params = target_rule.parameters or {}
+            max_concurrency = int(params.get("max_concurrency", 1)) if params else 1
+            log_success = processor_id != "mail_workflow"
+
+            if self._executor and max_concurrency > 1:
+                if log_success:
+                    future = self._executor.submit(run_and_log)
+                else:
+                    future = self._executor.submit(
+                        handler,
+                        item,
+                        self.config.destination_path,
+                        params,
+                    )
+                self._futures.append(future)
+            else:
+                if log_success:
+                    run_and_log()
+                else:
+                    handler(
+                        item,
+                        self.config.destination_path,
+                        params,
+                    )
             return True
         except Exception as e:
             print(f"   ❌ Engine Error: {e}")
             import traceback
             traceback.print_exc()
+            if processor_id == "mail_workflow":
+                record = build_record()
+                record["result"]["status"] = "error"
+                record["result"]["error"] = str(e)
+                append_run(record)
             return False

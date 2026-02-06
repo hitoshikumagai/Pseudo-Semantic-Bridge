@@ -3,15 +3,15 @@ from pathlib import Path
 
 import streamlit as st
 
+from src.adapter.outlook import OutlookAdapter
 from src.bridge.builder import build_all_configs
 from src.engine.core import GenericEtlEngine
-from src.adapter.outlook import OutlookAdapter
 from src.web.app_logic import (
-    load_rules,
     load_jsonl_runs,
+    load_rules,
     propose_rule_candidates,
-    save_rules,
     run_engine_job,
+    save_rules,
     start_job,
     summarize_quality,
 )
@@ -30,23 +30,31 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap');
     :root {
-        --bg: #f6f4ef;
-        --ink: #111111;
-        --accent: #157a6e;
-        --accent-2: #f59e0b;
-        --card: #ffffff;
-        --muted: #6b7280;
+        --bg: #0a1118;
+        --bg-soft: #0f1722;
+        --ink: #e6edf6;
+        --accent: #22d3a6;
+        --accent-2: #fb923c;
+        --card: #152131;
+        --line: #2b3a4f;
+        --muted: #94a3b8;
     }
     html, body, [class*="stApp"] {
         font-family: "Space Grotesk", sans-serif;
         color: var(--ink);
         background: var(--bg);
     }
+    [data-testid="stAppViewContainer"] {
+        background:
+            radial-gradient(circle at 85% -20%, #134e4a55 0%, transparent 35%),
+            radial-gradient(circle at 10% -10%, #7c2d1250 0%, transparent 32%),
+            var(--bg);
+    }
     .psb-hero {
-        background: linear-gradient(135deg, #e6f4f1 0%, #fff7e6 100%);
+        background: linear-gradient(135deg, #0f1f2f 0%, #17263a 100%);
         padding: 24px 28px;
         border-radius: 16px;
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--line);
     }
     .psb-title {
         font-size: 32px;
@@ -61,41 +69,50 @@ st.markdown(
         background: var(--card);
         padding: 16px 18px;
         border-radius: 12px;
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--line);
     }
-    .psb-idea-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-    }
-    .psb-idea-card {
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
+    .psb-kpi {
+        background: var(--card);
+        border: 1px solid var(--line);
         border-radius: 12px;
         padding: 14px 16px;
-        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
     }
-    .psb-idea-title {
-        font-weight: 600;
-        margin: 0 0 6px 0;
-    }
-    .psb-idea-meta {
-        font-size: 12px;
+    .psb-kpi-label {
         color: var(--muted);
-        margin-bottom: 10px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
     }
-    .psb-pill {
-        display: inline-block;
-        font-size: 11px;
-        padding: 2px 8px;
+    .psb-kpi-value {
+        color: var(--ink);
+        font-size: 28px;
+        font-weight: 600;
+        margin-top: 4px;
+    }
+    .psb-skeleton-card {
+        background: linear-gradient(180deg, #172334 0%, #131d2c 100%);
+        padding: 14px 16px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+    }
+    .psb-skeleton-title {
+        margin: 0 0 10px 0;
+        color: var(--ink);
+        font-weight: 600;
+        font-size: 14px;
+    }
+    .psb-skeleton-bar {
+        height: 10px;
         border-radius: 999px;
-        background: #f3f4f6;
-        color: #111827;
-        margin-right: 6px;
+        margin-bottom: 8px;
+        background: linear-gradient(90deg, #233246 10%, #304661 40%, #233246 70%);
+        background-size: 220% 100%;
+        animation: shimmer 1.6s infinite linear;
     }
-    .psb-pill.high { background: #fee2e2; color: #991b1b; }
-    .psb-pill.medium { background: #fef3c7; color: #92400e; }
-    .psb-pill.low { background: #e0f2fe; color: #075985; }
+    @keyframes shimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -20% 0; }
+    }
     .psb-label {
         font-size: 12px;
         letter-spacing: 0.08em;
@@ -111,11 +128,37 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
+def render_kpi(label: str, value: str):
+    st.markdown(
+        f"""
+        <div class="psb-kpi">
+            <div class="psb-kpi-label">{label}</div>
+            <div class="psb-kpi-value">{value}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_skeleton_card(title: str, widths: list[int]):
+    bars = "".join([f'<div class="psb-skeleton-bar" style="width:{width}%"></div>' for width in widths])
+    st.markdown(
+        f"""
+        <div class="psb-skeleton-card">
+            <div class="psb-skeleton-title">{title}</div>
+            {bars}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 st.markdown(
     f"""
     <div class="psb-hero">
         <div class="psb-title">{APP_TITLE}</div>
-        <p class="psb-sub">Edit business rules, then run the pipeline as a background job.</p>
+        <p class="psb-sub">Dark-mode skeleton for planning Rules, Quality, and Pipeline flow.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -123,7 +166,7 @@ st.markdown(
 
 st.write("")
 
-tabs = st.tabs(["Rules", "AI Rule Builder", "Quality Feedback", "Run"])
+tabs = st.tabs(["Overview", "Rules", "AI Rule Builder", "Quality Feedback", "Run"])
 
 if "rules" not in st.session_state:
     existing_rules = load_rules(RULES_PATH)
@@ -138,7 +181,40 @@ if "rules" not in st.session_state:
         }
     ]
 
+if "ai_meta" not in st.session_state:
+    st.session_state["ai_meta"] = []
+
+if "ai_candidates" not in st.session_state:
+    st.session_state["ai_candidates"] = []
+
 with tabs[0]:
+    runs = load_jsonl_runs(LOGS_PATH)
+    summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
+    success_rate = round((summary["success"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
+    quality_rate = round((summary["quality_ok"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
+
+    st.markdown("<div class='psb-label'>Control Tower</div>", unsafe_allow_html=True)
+    col_a, col_b, col_c, col_d = st.columns(4)
+    with col_a:
+        render_kpi("Rules", str(len(st.session_state["rules"])))
+    with col_b:
+        render_kpi("Runs", str(summary["total"]))
+    with col_c:
+        render_kpi("Success Rate", f"{success_rate}%")
+    with col_d:
+        render_kpi("Quality OK", f"{quality_rate}%")
+
+    st.write("")
+    st.markdown("<div class='psb-label'>Planned Modules (Skeleton)</div>", unsafe_allow_html=True)
+    col_e, col_f, col_g = st.columns(3)
+    with col_e:
+        render_skeleton_card("Intake Flow", [92, 75, 60, 84])
+    with col_f:
+        render_skeleton_card("Rule Suggestion", [88, 82, 68, 54])
+    with col_g:
+        render_skeleton_card("Run Timeline", [90, 65, 72, 58])
+
+with tabs[1]:
     st.markdown("<div class='psb-label'>Business Rules</div>", unsafe_allow_html=True)
     edited = st.data_editor(
         st.session_state["rules"],
@@ -156,11 +232,11 @@ with tabs[0]:
     with col_b:
         if st.button("Reload"):
             st.session_state["rules"] = load_rules(RULES_PATH)
-            st.experimental_rerun()
+            st.rerun()
 
-with tabs[1]:
+with tabs[2]:
     st.markdown("<div class='psb-label'>AI Rule Builder (Preview)</div>", unsafe_allow_html=True)
-    st.write("Generate Excel-compatible rule rows from JSONL logs with user guidance.")
+    st.write("Skeleton UI for candidate generation flow. Current logic is connected at preview level.")
 
     col_a, col_b, col_c = st.columns([1, 1, 1])
     with col_a:
@@ -221,11 +297,13 @@ with tabs[1]:
     )
     st.caption(f"Log path: {LOGS_PATH}")
 
-    if st.session_state.get("ai_meta"):
+    if st.session_state["ai_meta"]:
         st.markdown("<div class='psb-label'>Candidate Meta</div>", unsafe_allow_html=True)
         st.dataframe(st.session_state["ai_meta"], use_container_width=True)
+    else:
+        render_skeleton_card("Candidate Meta Table", [96, 84, 74])
 
-    if st.session_state.get("ai_candidates"):
+    if st.session_state["ai_candidates"]:
         st.markdown("<div class='psb-label'>Candidate Rows (Excel compatible)</div>", unsafe_allow_html=True)
         candidates_with_select = []
         for row in st.session_state["ai_candidates"]:
@@ -258,11 +336,13 @@ with tabs[1]:
             else:
                 st.session_state["rules"].extend(selected)
                 st.success(f"Appended {len(selected)} rows to rules (draft).")
-                st.experimental_rerun()
+                st.rerun()
+    else:
+        render_skeleton_card("Candidate Rows Table", [92, 66, 82, 54])
 
-with tabs[2]:
+with tabs[3]:
     st.markdown("<div class='psb-label'>Quality Intake</div>", unsafe_allow_html=True)
-    st.write("受付フォームで目的を整理し、AIがワークフロー化/スキル化を提案します。")
+    st.write("受付フォームの骨組みを固定し、AI解析カードをスケルトン表示します。")
 
     col_a, col_b = st.columns([2, 1])
     with col_a:
@@ -318,16 +398,23 @@ with tabs[2]:
             }
             st.success("受付内容を保存しました。")
     with col_d:
-        if st.button("AIで整理（準備）", type="primary"):
-            st.session_state["quality_intake_ready"] = True
+        st.button("AIで整理（準備）", type="primary", disabled=True)
+        st.caption("TODO: LLM orchestration")
 
     st.write("")
     st.markdown("<div class='psb-label'>AI解析結果（予定）</div>", unsafe_allow_html=True)
-    st.caption("次のフェーズで生成AIを接続し、要約・ワークフロー案・スキル案を表示します。")
+    col_e, col_f, col_g = st.columns(3)
+    with col_e:
+        render_skeleton_card("Rule Check Agent", [94, 80, 72])
+    with col_f:
+        render_skeleton_card("Workflow Agent", [90, 76, 66])
+    with col_g:
+        render_skeleton_card("Skill Agent", [82, 70, 64])
+
     if st.session_state.get("quality_intake"):
         st.json(st.session_state["quality_intake"])
 
-with tabs[3]:
+with tabs[4]:
     st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='psb-card'>"
@@ -344,9 +431,9 @@ with tabs[3]:
         st.session_state.setdefault("jobs", {})
         job_id = start_job(
             st.session_state["jobs"],
-            lambda job_id: run_engine_job(
+            lambda current_job_id: run_engine_job(
                 st.session_state["jobs"],
-                job_id,
+                current_job_id,
                 build_all_configs,
                 SYSTEM_CONFIG_PATH,
                 OutlookAdapter,

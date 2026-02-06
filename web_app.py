@@ -7,6 +7,7 @@ from src.adapter.outlook import OutlookAdapter
 from src.bridge.builder import build_all_configs
 from src.engine.core import GenericEtlEngine
 from src.web.app_logic import (
+    analyze_and_log_user_instruction,
     compute_job_duration_seconds,
     generate_intent_spec,
     load_jsonl_runs,
@@ -25,6 +26,7 @@ APP_TITLE = "Pseudo Semantic Bridge"
 RULES_PATH = Path("configs/accounting/mail_business_rules.json")
 SYSTEM_CONFIG_PATH = Path("configs/accounting/invoice_bot_v2.json")
 LOGS_PATH = Path("data/logs/psb_run.jsonl")
+INTAKE_LOGS_PATH = Path("data/logs/intent_intake.jsonl")
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -200,6 +202,9 @@ if "intent_spec_source" not in st.session_state:
 if "intent_spec_error" not in st.session_state:
     st.session_state["intent_spec_error"] = None
 
+if "instruction_intake" not in st.session_state:
+    st.session_state["instruction_intake"] = None
+
 with tabs[0]:
     runs = load_jsonl_runs(LOGS_PATH)
     summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
@@ -271,6 +276,45 @@ with tabs[2]:
         placeholder="例: 請求書はOCRを優先。日報は保存のみ。",
         height=80,
     )
+    col_i1, col_i2 = st.columns([1, 1])
+    with col_i1:
+        domain_hint = st.text_input("Domain hint", value="accounting_mail_invoice")
+    with col_i2:
+        instruction_model = st.text_input("Instruction model", value="gpt-4o-mini")
+
+    col_i3, col_i4 = st.columns([1, 1])
+    with col_i3:
+        if st.button("Instruction 解析 (AI)"):
+            analyzed, error, source = analyze_and_log_user_instruction(
+                user_instruction=user_instruction,
+                log_path=INTAKE_LOGS_PATH,
+                domain_hint=domain_hint,
+                use_ai=True,
+                model=instruction_model,
+            )
+            st.session_state["instruction_intake"] = analyzed
+            if error:
+                st.warning(error)
+            else:
+                st.success("Instruction analyzed by AI and logged.")
+    with col_i4:
+        if st.button("Instruction 解析 (Template)"):
+            analyzed, error, source = analyze_and_log_user_instruction(
+                user_instruction=user_instruction,
+                log_path=INTAKE_LOGS_PATH,
+                domain_hint=domain_hint,
+                use_ai=False,
+            )
+            st.session_state["instruction_intake"] = analyzed
+            if error:
+                st.warning(error)
+            else:
+                st.success("Instruction analyzed by template and logged.")
+
+    st.caption(f"Instruction intake log: {INTAKE_LOGS_PATH}")
+    if st.session_state["instruction_intake"]:
+        st.markdown("<div class='psb-label'>Instruction Analysis</div>", unsafe_allow_html=True)
+        st.json(st.session_state["instruction_intake"])
 
     if st.button("Generate Candidates", type="primary"):
         runs = load_jsonl_runs(LOGS_PATH)

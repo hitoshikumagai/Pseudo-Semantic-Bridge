@@ -114,6 +114,22 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.load_jsonl_runs = lambda _path: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     fake_app_logic.save_rules = lambda *_args, **_kwargs: None
+    fake_app_logic.analyze_and_log_user_instruction = (
+        lambda **_kwargs: (
+            {
+                "record_type": "instruction_intake",
+                "source": "template",
+                "instruction_raw": "smoke",
+                "intent_summary": "smoke",
+                "tasks": [],
+                "constraints": [],
+                "missing_info": [],
+                "follow_up_questions": [],
+            },
+            None,
+            "template",
+        )
+    )
     fake_app_logic.compute_job_duration_seconds = lambda _job: 0.1
     fake_app_logic.summarize_run_window = (
         lambda runs, start_index=0: {

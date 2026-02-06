@@ -433,3 +433,46 @@ def test_compute_job_duration_seconds():
         "ended_at": "2026-02-06T11:10:03.250000+00:00",
     }
     assert app_logic.compute_job_duration_seconds(job) == 2.25
+
+
+def test_analyze_user_instruction_template_mode():
+    analyzed, error, source = app_logic.analyze_user_instruction(
+        user_instruction="請求書をOCRして保存したい",
+        domain_hint="accounting_mail_invoice",
+        use_ai=False,
+    )
+    assert error is None
+    assert source == "template"
+    assert analyzed["record_type"] == "instruction_intake"
+    assert analyzed["tasks"]
+    assert analyzed["follow_up_questions"]
+
+
+def test_analyze_user_instruction_ai_without_key_falls_back(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    analyzed, error, source = app_logic.analyze_user_instruction(
+        user_instruction="分類して処理したい",
+        domain_hint="accounting_mail_invoice",
+        use_ai=True,
+    )
+    assert source == "template"
+    assert "OPENAI_API_KEY not found" in error
+    assert analyzed["intent_summary"]
+
+
+def test_analyze_and_log_user_instruction_writes_jsonl(tmp_path):
+    log_path = tmp_path / "intent_intake.jsonl"
+    record, error, source = app_logic.analyze_and_log_user_instruction(
+        user_instruction="請求書をOCRして保存したい",
+        log_path=log_path,
+        domain_hint="accounting_mail_invoice",
+        use_ai=False,
+    )
+    assert error is None
+    assert source == "template"
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    saved = json.loads(lines[0])
+    assert saved["record_type"] == "instruction_intake"
+    assert saved["source"] == "template"
+    assert record["instruction_raw"] == "請求書をOCRして保存したい"

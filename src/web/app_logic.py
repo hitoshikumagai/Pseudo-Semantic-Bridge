@@ -125,6 +125,13 @@ def compute_job_duration_seconds(job: Dict[str, Any]) -> Optional[float]:
         return None
 
 
+def append_jsonl_record(path: Path, record: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(record, ensure_ascii=False)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(payload + "\n")
+
+
 def start_job(jobs: dict, run_fn):
     job_id = f"job-{int(time.time())}"
     jobs[job_id] = {"status": "queued"}
@@ -460,6 +467,96 @@ def _build_template_spec(
     }
 
 
+def _build_instruction_template(user_instruction: str, domain_hint: str) -> Dict[str, Any]:
+    raw = (user_instruction or "").strip()
+    lowered = raw.lower()
+    tasks: List[str] = []
+    constraints: List[str] = []
+    follow_up_questions: List[str] = []
+
+    if "請求" in raw or "invoice" in lowered:
+        tasks.append("請求書メールを特定し、添付を抽出してOCR処理する")
+        constraints.append("個人情報・機密情報を保持したまま保存先を管理する")
+    if "分類" in raw or "classify" in lowered:
+        tasks.append("文書種別を判定してルーティングする")
+    if "遅い" in raw or "slow" in lowered:
+        constraints.append("処理時間の短縮が必要")
+
+    if not tasks:
+        tasks.append("ユーザー要求を実行可能なステップに分解する")
+    if not constraints:
+        constraints.append("曖昧な要件を確認質問で補完する")
+
+    follow_up_questions.extend(
+        [
+            "入力データの対象期間はどれくらいですか？",
+            "成功とみなす品質基準は何ですか？",
+            "失敗時の扱い（再試行/手動対応）はどうしますか？",
+        ]
+    )
+
+    return {
+        "record_type": "instruction_intake",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "domain_hint": domain_hint or "accounting_mail_invoice",
+        "instruction_raw": raw,
+        "intent_summary": raw or "No instruction provided.",
+        "tasks": tasks,
+        "constraints": constraints,
+        "missing_info": [
+            "target data range",
+            "acceptance criteria",
+            "failure handling policy",
+        ],
+        "follow_up_questions": follow_up_questions,
+    }
+
+
+def _generate_instruction_with_openai(
+    user_instruction: str,
+    domain_hint: str,
+    model: str,
+) -> Dict[str, Any]:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    completion = client.chat.completions.create(
+        model=model,
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You extract user intent for automation design. Output strict JSON only with keys: "
+                    "intent_summary, tasks, constraints, missing_info, follow_up_questions."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"domain_hint: {domain_hint}\n"
+                    f"user_instruction: {user_instruction}\n"
+                    "Return concise Japanese text."
+                ),
+            },
+        ],
+    )
+    content = completion.choices[0].message.content or "{}"
+    data = json.loads(content)
+    return {
+        "record_type": "instruction_intake",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "domain_hint": domain_hint or "accounting_mail_invoice",
+        "instruction_raw": (user_instruction or "").strip(),
+        "intent_summary": data.get("intent_summary") or "",
+        "tasks": data.get("tasks") or [],
+        "constraints": data.get("constraints") or [],
+        "missing_info": data.get("missing_info") or [],
+        "follow_up_questions": data.get("follow_up_questions") or [],
+    }
+
+
 def _generate_spec_with_openai(prompt_text: str, model: str) -> Dict[str, Any]:
     from openai import OpenAI
 
@@ -526,3 +623,50 @@ def generate_intent_spec(
             f"AI generation failed ({exc}). Generated template spec instead.",
             "template",
         )
+
+
+def analyze_user_instruction(
+    user_instruction: str,
+    domain_hint: str = "accounting_mail_invoice",
+    use_ai: bool = False,
+    model: str = "gpt-4o-mini",
+) -> Tuple[Dict[str, Any], Optional[str], str]:
+    template_result = _build_instruction_template(user_instruction, domain_hint=domain_hint)
+    if not use_ai:
+        return template_result, None, "template"
+
+    if not os.getenv("OPENAI_API_KEY"):
+        return template_result, "OPENAI_API_KEY not found. Generated template analysis instead.", "template"
+
+    try:
+        ai_result = _generate_instruction_with_openai(
+            user_instruction=user_instruction,
+            domain_hint=domain_hint,
+            model=model,
+        )
+        return ai_result, None, "llm"
+    except Exception as exc:
+        return (
+            template_result,
+            f"AI analysis failed ({exc}). Generated template analysis instead.",
+            "template",
+        )
+
+
+def analyze_and_log_user_instruction(
+    user_instruction: str,
+    log_path: Path,
+    domain_hint: str = "accounting_mail_invoice",
+    use_ai: bool = False,
+    model: str = "gpt-4o-mini",
+) -> Tuple[Dict[str, Any], Optional[str], str]:
+    result, error, source = analyze_user_instruction(
+        user_instruction=user_instruction,
+        domain_hint=domain_hint,
+        use_ai=use_ai,
+        model=model,
+    )
+    payload = dict(result)
+    payload["source"] = source
+    append_jsonl_record(log_path, payload)
+    return payload, error, source

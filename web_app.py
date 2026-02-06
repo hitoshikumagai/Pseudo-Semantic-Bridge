@@ -7,6 +7,7 @@ from src.adapter.outlook import OutlookAdapter
 from src.bridge.builder import build_all_configs
 from src.engine.core import GenericEtlEngine
 from src.web.app_logic import (
+    compute_job_duration_seconds,
     generate_intent_spec,
     load_jsonl_runs,
     load_rules,
@@ -14,6 +15,7 @@ from src.web.app_logic import (
     run_engine_job,
     save_rules,
     start_job,
+    summarize_run_detail_rows,
     summarize_quality,
     summarize_run_window,
 )
@@ -495,6 +497,9 @@ with tabs[4]:
         jobs[job_id]["log_start_index"] = baseline_count
         st.session_state["last_job_id"] = job_id
 
+    if st.button("Refresh Results"):
+        st.rerun()
+
     st.write("")
     current_spec = st.session_state.get("intent_spec") or {}
     if current_spec.get("spec_id"):
@@ -509,6 +514,7 @@ with tabs[4]:
     if last_job_id and last_job_id in jobs:
         current_runs = load_jsonl_runs(LOGS_PATH)
         last_job = jobs[last_job_id]
+        duration_sec = compute_job_duration_seconds(last_job)
         summary = summarize_run_window(
             current_runs,
             start_index=int(last_job.get("log_start_index", 0)),
@@ -529,6 +535,29 @@ with tabs[4]:
             st.caption(f"Latest log time: {summary['latest_timestamp']}")
         if summary["latest_error"]:
             st.warning(f"Latest error: {summary['latest_error']}")
+
+        st.markdown("<div class='psb-label'>Last Run Detail</div>", unsafe_allow_html=True)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            st.caption(f"job_id: {last_job_id}")
+        with c2:
+            st.caption(f"status: {last_job.get('status', '-')}")
+        with c3:
+            st.caption(f"started_at: {last_job.get('started_at', '-')}")
+        with c4:
+            st.caption(f"ended_at: {last_job.get('ended_at', '-')}")
+        with c5:
+            st.caption(f"duration_sec: {duration_sec if duration_sec is not None else '-'}")
+
+        detail_rows = summarize_run_detail_rows(
+            current_runs,
+            start_index=int(last_job.get("log_start_index", 0)),
+            limit=100,
+        )
+        if detail_rows:
+            st.dataframe(detail_rows, use_container_width=True)
+        else:
+            st.info("No detailed logs found for this run window yet.")
 
     st.markdown("<div class='psb-label'>Job Status</div>", unsafe_allow_html=True)
     if not jobs:

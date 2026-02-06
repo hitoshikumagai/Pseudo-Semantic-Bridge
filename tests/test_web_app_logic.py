@@ -407,3 +407,29 @@ def test_summarize_run_window_respects_start_index():
     assert summary["total"] == 1
     assert summary["success"] == 0
     assert summary["error"] == 1
+
+
+def test_summarize_run_detail_rows_extracts_expected_fields():
+    runs = [
+        {
+            "timestamp": "2026-02-06T11:10:01Z",
+            "workflow": "engine",
+            "action_id": "save_only",
+            "input": {"subject": "Invoice 123", "attachment_ext": ".pdf"},
+            "result": {"status": "success", "error": None, "output_path": "data/out/a.txt"},
+            "quality": {"label": "ok", "score": 0.91},
+        }
+    ]
+    rows = app_logic.summarize_run_detail_rows(runs, start_index=0, limit=10)
+    assert len(rows) == 1
+    assert rows[0]["workflow"] == "engine"
+    assert rows[0]["subject"] == "Invoice 123"
+    assert rows[0]["quality_score"] == 0.91
+
+
+def test_compute_job_duration_seconds():
+    job = {
+        "started_at": "2026-02-06T11:10:01+00:00",
+        "ended_at": "2026-02-06T11:10:03.250000+00:00",
+    }
+    assert app_logic.compute_job_duration_seconds(job) == 2.25

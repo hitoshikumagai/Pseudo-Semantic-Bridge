@@ -82,6 +82,49 @@ def summarize_run_window(
     }
 
 
+def summarize_run_detail_rows(
+    runs: List[Dict[str, Any]],
+    start_index: int = 0,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    scoped_runs = runs[max(start_index, 0) :]
+    rows: List[Dict[str, Any]] = []
+    for run in scoped_runs[-max(limit, 1) :]:
+        result = run.get("result") or {}
+        quality = run.get("quality") or {}
+        input_meta = run.get("input") or {}
+        rows.append(
+            {
+                "timestamp": run.get("timestamp"),
+                "workflow": run.get("workflow"),
+                "action_id": run.get("action_id"),
+                "status": result.get("status"),
+                "error": result.get("error"),
+                "output_path": result.get("output_path"),
+                "subject": input_meta.get("subject"),
+                "attachment_ext": input_meta.get("attachment_ext"),
+                "quality_label": quality.get("label"),
+                "quality_score": quality.get("score"),
+            }
+        )
+    rows.reverse()
+    return rows
+
+
+def compute_job_duration_seconds(job: Dict[str, Any]) -> Optional[float]:
+    started_at = job.get("started_at")
+    ended_at = job.get("ended_at")
+    if not started_at or not ended_at:
+        return None
+    try:
+        start_dt = datetime.fromisoformat(str(started_at))
+        end_dt = datetime.fromisoformat(str(ended_at))
+        seconds = (end_dt - start_dt).total_seconds()
+        return round(max(seconds, 0.0), 3)
+    except Exception:
+        return None
+
+
 def start_job(jobs: dict, run_fn):
     job_id = f"job-{int(time.time())}"
     jobs[job_id] = {"status": "queued"}

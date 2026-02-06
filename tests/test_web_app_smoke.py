@@ -114,6 +114,7 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.load_jsonl_runs = lambda _path: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     fake_app_logic.save_rules = lambda *_args, **_kwargs: None
+    fake_app_logic.compute_job_duration_seconds = lambda _job: 0.1
     fake_app_logic.summarize_run_window = (
         lambda runs, start_index=0: {
             "total": max(len(runs) - start_index, 0),
@@ -125,6 +126,7 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
             "workflows": [],
         }
     )
+    fake_app_logic.summarize_run_detail_rows = lambda *_args, **_kwargs: []
     fake_app_logic.generate_intent_spec = (
         lambda **_kwargs: (
             {

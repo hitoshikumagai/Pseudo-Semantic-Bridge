@@ -24,6 +24,7 @@ def load_system_config(path: Path) -> OutlookConfig:
 
 
 def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter_factory, engine_factory):
+    jobs.setdefault(job_id, {"status": "queued"})
     jobs[job_id]["status"] = "running"
     try:
         build_fn()

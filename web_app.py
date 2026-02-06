@@ -415,6 +415,7 @@ with tabs[3]:
         st.json(st.session_state["quality_intake"])
 
 with tabs[4]:
+    jobs = st.session_state.setdefault("jobs", {})
     st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
     st.markdown(
         "<div class='psb-card'>"
@@ -428,23 +429,24 @@ with tabs[4]:
 
     st.write("")
     if st.button("Run Pipeline"):
-        st.session_state.setdefault("jobs", {})
-        job_id = start_job(
-            st.session_state["jobs"],
-            lambda current_job_id: run_engine_job(
-                st.session_state["jobs"],
+        def _run(current_job_id: str):
+            run_engine_job(
+                jobs,
                 current_job_id,
                 build_all_configs,
                 SYSTEM_CONFIG_PATH,
                 OutlookAdapter,
                 GenericEtlEngine,
-            ),
+            )
+
+        job_id = start_job(
+            jobs,
+            _run,
         )
         st.session_state["last_job_id"] = job_id
 
     st.write("")
     st.markdown("<div class='psb-label'>Job Status</div>", unsafe_allow_html=True)
-    jobs = st.session_state.get("jobs", {})
     if not jobs:
         st.info("No jobs yet.")
     else:

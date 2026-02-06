@@ -635,6 +635,18 @@ with tabs[4]:
         else:
             st.info("No detailed logs found for this run window yet.")
 
+        pipeline_summary = last_job.get("pipeline_summary")
+        if pipeline_summary:
+            st.markdown("<div class='psb-label'>Notebook Baseline Summary</div>", unsafe_allow_html=True)
+            st.caption(
+                f"status: {pipeline_summary.get('status')} | "
+                f"started_at: {pipeline_summary.get('started_at')} | "
+                f"ended_at: {pipeline_summary.get('ended_at')}"
+            )
+            st.dataframe(pipeline_summary.get("artifacts", []), use_container_width=True)
+            if pipeline_summary.get("error"):
+                st.warning(f"Pipeline error: {pipeline_summary.get('error')}")
+
     st.markdown("<div class='psb-label'>Job Status</div>", unsafe_allow_html=True)
     if not jobs:
         st.info("No jobs yet.")

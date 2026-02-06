@@ -81,6 +81,7 @@ def test_run_engine_job_sets_done(monkeypatch, tmp_path):
     )
 
     assert jobs["job-1"]["status"] == "done"
+    assert jobs["job-1"]["pipeline_summary"]["status"] == "done"
 
 
 def test_run_engine_job_sets_error(tmp_path):
@@ -114,6 +115,7 @@ def test_run_engine_job_sets_error(tmp_path):
     )
 
     assert jobs["job-1"]["status"].startswith("error:")
+    assert jobs["job-1"]["pipeline_summary"]["status"] == "error"
 
 
 def test_run_engine_job_initializes_missing_job_entry(tmp_path):
@@ -155,6 +157,54 @@ def test_run_engine_job_initializes_missing_job_entry(tmp_path):
     )
 
     assert jobs["job-1"]["status"] == "done"
+
+
+def test_run_pipeline_baseline_success(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "job_name": "test",
+                "version": "2.0",
+                "domain": "test",
+                "search_keywords": ["x"],
+                "destination_path": "/tmp",
+                "rules": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class DummyEngine:
+        def __init__(self, config, adapter):
+            self.config = config
+            self.adapter = adapter
+
+        def run(self):
+            return None
+
+    summary = app_logic.run_pipeline_baseline(
+        build_fn=lambda: None,
+        config_path=config_path,
+        adapter_factory=lambda: object(),
+        engine_factory=DummyEngine,
+    )
+    assert summary["status"] == "done"
+    assert summary["error"] is None
+    assert summary["artifacts"][0]["exists"] is True
+
+
+def test_run_pipeline_baseline_error(tmp_path):
+    config_path = tmp_path / "missing.json"
+    summary = app_logic.run_pipeline_baseline(
+        build_fn=lambda: None,
+        config_path=config_path,
+        adapter_factory=lambda: object(),
+        engine_factory=lambda config, adapter: object(),
+    )
+    assert summary["status"] == "error"
+    assert summary["error"]
+    assert summary["artifacts"][0]["exists"] is False
 
 
 def test_load_jsonl_runs_skips_invalid_lines(tmp_path):

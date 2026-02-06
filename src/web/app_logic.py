@@ -25,21 +25,56 @@ def load_system_config(path: Path) -> OutlookConfig:
     return OutlookConfig(**data)
 
 
-def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter_factory, engine_factory):
-    jobs.setdefault(job_id, {"status": "queued"})
-    jobs[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
-    jobs[job_id]["status"] = "running"
+def run_pipeline_baseline(
+    build_fn,
+    config_path: Path,
+    adapter_factory,
+    engine_factory,
+) -> Dict[str, Any]:
+    """
+    Canonical pipeline flow used by notebook and web app:
+    1) build configs
+    2) load main system config
+    3) run engine
+    """
+    started_at = datetime.now(timezone.utc).isoformat()
+    status = "done"
+    error: Optional[str] = None
     try:
         build_fn()
         config = load_system_config(config_path)
         adapter = adapter_factory()
         engine = engine_factory(config, adapter)
         engine.run()
+    except Exception as exc:
+        status = "error"
+        error = str(exc)
+    ended_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "status": status,
+        "error": error,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "artifacts": [_file_snapshot(config_path)],
+    }
+
+
+def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter_factory, engine_factory):
+    jobs.setdefault(job_id, {"status": "queued"})
+    jobs[job_id]["status"] = "running"
+    pipeline_summary = run_pipeline_baseline(
+        build_fn=build_fn,
+        config_path=config_path,
+        adapter_factory=adapter_factory,
+        engine_factory=engine_factory,
+    )
+    jobs[job_id]["pipeline_summary"] = pipeline_summary
+    jobs[job_id]["started_at"] = pipeline_summary["started_at"]
+    jobs[job_id]["ended_at"] = pipeline_summary["ended_at"]
+    if pipeline_summary["status"] == "done":
         jobs[job_id]["status"] = "done"
-    except Exception as e:
-        jobs[job_id]["status"] = f"error: {e}"
-    finally:
-        jobs[job_id]["ended_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        jobs[job_id]["status"] = f"error: {pipeline_summary.get('error')}"
 
 
 def summarize_run_window(

@@ -130,6 +130,15 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
             "template",
         )
     )
+    fake_app_logic.run_bridge_compile_summary = (
+        lambda *_args, **_kwargs: {
+            "status": "done",
+            "error": None,
+            "started_at": "2026-02-06T00:00:00+00:00",
+            "ended_at": "2026-02-06T00:00:01+00:00",
+            "artifacts": [],
+        }
+    )
     fake_app_logic.compute_job_duration_seconds = lambda _job: 0.1
     fake_app_logic.summarize_run_window = (
         lambda runs, start_index=0: {

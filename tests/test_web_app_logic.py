@@ -476,3 +476,31 @@ def test_analyze_and_log_user_instruction_writes_jsonl(tmp_path):
     assert saved["record_type"] == "instruction_intake"
     assert saved["source"] == "template"
     assert record["instruction_raw"] == "請求書をOCRして保存したい"
+
+
+def test_run_bridge_compile_summary_success(tmp_path):
+    system_path = tmp_path / "invoice_bot_v2.json"
+    rules_path = tmp_path / "mail_business_rules.json"
+
+    def build_fn():
+        system_path.write_text("{}", encoding="utf-8")
+        rules_path.write_text("[]", encoding="utf-8")
+
+    summary = app_logic.run_bridge_compile_summary(build_fn, system_path, rules_path)
+    assert summary["status"] == "done"
+    assert summary["error"] is None
+    assert summary["artifacts"][0]["exists"] is True
+    assert summary["artifacts"][1]["exists"] is True
+
+
+def test_run_bridge_compile_summary_error(tmp_path):
+    system_path = tmp_path / "invoice_bot_v2.json"
+    rules_path = tmp_path / "mail_business_rules.json"
+
+    def build_fn():
+        raise RuntimeError("compile failed")
+
+    summary = app_logic.run_bridge_compile_summary(build_fn, system_path, rules_path)
+    assert summary["status"] == "error"
+    assert "compile failed" in summary["error"]
+    assert summary["artifacts"][0]["exists"] is False

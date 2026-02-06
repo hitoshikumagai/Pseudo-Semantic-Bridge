@@ -13,6 +13,7 @@ from src.web.app_logic import (
     load_jsonl_runs,
     load_rules,
     propose_rule_candidates,
+    run_bridge_compile_summary,
     run_engine_job,
     save_rules,
     start_job,
@@ -204,6 +205,9 @@ if "intent_spec_error" not in st.session_state:
 
 if "instruction_intake" not in st.session_state:
     st.session_state["instruction_intake"] = None
+
+if "compile_summary" not in st.session_state:
+    st.session_state["compile_summary"] = None
 
 with tabs[0]:
     runs = load_jsonl_runs(LOGS_PATH)
@@ -519,29 +523,43 @@ with tabs[4]:
     )
 
     st.write("")
-    if st.button("Run Pipeline"):
-        baseline_count = len(load_jsonl_runs(LOGS_PATH))
-        current_spec = st.session_state.get("intent_spec") or {}
-
-        def _run(current_job_id: str):
-            run_engine_job(
-                jobs,
-                current_job_id,
+    run_col_a, run_col_b = st.columns([1, 1])
+    with run_col_a:
+        if st.button("Compile Specs Only"):
+            compile_summary = run_bridge_compile_summary(
                 build_all_configs,
                 SYSTEM_CONFIG_PATH,
-                OutlookAdapter,
-                GenericEtlEngine,
+                RULES_PATH,
             )
+            st.session_state["compile_summary"] = compile_summary
+            if compile_summary["status"] == "done":
+                st.success("Bridge compile completed.")
+            else:
+                st.error(f"Bridge compile failed: {compile_summary.get('error')}")
+    with run_col_b:
+        if st.button("Run Pipeline"):
+            baseline_count = len(load_jsonl_runs(LOGS_PATH))
+            current_spec = st.session_state.get("intent_spec") or {}
 
-        job_id = start_job(
-            jobs,
-            _run,
-        )
-        if current_spec.get("spec_id"):
-            jobs[job_id]["spec_id"] = current_spec["spec_id"]
-            jobs[job_id]["spec_source"] = st.session_state.get("intent_spec_source")
-        jobs[job_id]["log_start_index"] = baseline_count
-        st.session_state["last_job_id"] = job_id
+            def _run(current_job_id: str):
+                run_engine_job(
+                    jobs,
+                    current_job_id,
+                    build_all_configs,
+                    SYSTEM_CONFIG_PATH,
+                    OutlookAdapter,
+                    GenericEtlEngine,
+                )
+
+            job_id = start_job(
+                jobs,
+                _run,
+            )
+            if current_spec.get("spec_id"):
+                jobs[job_id]["spec_id"] = current_spec["spec_id"]
+                jobs[job_id]["spec_source"] = st.session_state.get("intent_spec_source")
+            jobs[job_id]["log_start_index"] = baseline_count
+            st.session_state["last_job_id"] = job_id
 
     if st.button("Refresh Results"):
         st.rerun()
@@ -555,6 +573,18 @@ with tabs[4]:
         )
     else:
         st.caption("Current spec: not generated yet")
+
+    compile_summary = st.session_state.get("compile_summary")
+    if compile_summary:
+        st.markdown("<div class='psb-label'>Last Compile Summary</div>", unsafe_allow_html=True)
+        st.caption(
+            f"status: {compile_summary.get('status')} | "
+            f"started_at: {compile_summary.get('started_at')} | "
+            f"ended_at: {compile_summary.get('ended_at')}"
+        )
+        st.dataframe(compile_summary.get("artifacts", []), use_container_width=True)
+        if compile_summary.get("error"):
+            st.warning(f"Compile error: {compile_summary.get('error')}")
 
     last_job_id = st.session_state.get("last_job_id")
     if last_job_id and last_job_id in jobs:

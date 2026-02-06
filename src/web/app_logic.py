@@ -132,6 +132,44 @@ def append_jsonl_record(path: Path, record: Dict[str, Any]) -> None:
         f.write(payload + "\n")
 
 
+def _file_snapshot(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {"path": str(path), "exists": False, "size": None, "mtime": None}
+    stat = path.stat()
+    return {
+        "path": str(path),
+        "exists": True,
+        "size": int(stat.st_size),
+        "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
+
+
+def run_bridge_compile_summary(
+    build_fn,
+    system_config_path: Path,
+    rules_path: Path,
+) -> Dict[str, Any]:
+    started_at = datetime.now(timezone.utc).isoformat()
+    status = "done"
+    error: Optional[str] = None
+    try:
+        build_fn()
+    except Exception as exc:
+        status = "error"
+        error = str(exc)
+    ended_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "status": status,
+        "error": error,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "artifacts": [
+            _file_snapshot(system_config_path),
+            _file_snapshot(rules_path),
+        ],
+    }
+
+
 def start_job(jobs: dict, run_fn):
     job_id = f"job-{int(time.time())}"
     jobs[job_id] = {"status": "queued"}

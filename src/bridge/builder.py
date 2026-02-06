@@ -4,33 +4,32 @@ import pandas as pd
 from src.bridge.excel_parser import parse_excel_spec
 
 # =========================================================
-# 🏗️ Internal Compilation Logic
+# Internal Compilation Logic
 # =========================================================
 
 def _compile_system_spec(excel_path: str, json_out_path: str):
     """
-    システム仕様書 (invoice_bot_v2.xlsx) のコンパイル
+    Compile system spec (invoice_bot_v2.xlsx).
     Returns: Pydantic Model -> JSON File
     """
-    print(f"📖 System Spec解析: {excel_path}")
+    print(f"📖 System Spec parse: {excel_path}")
     
-    # 1. Excelを解析してオブジェクトを取得 (OutlookConfig Object)
+    # Parse Excel into OutlookConfig
     spec_data = parse_excel_spec(excel_path)
     
     if spec_data:
         os.makedirs(os.path.dirname(json_out_path), exist_ok=True)
         with open(json_out_path, "w", encoding='utf-8') as f:
             
-            # ★ ここが修正ポイント ★
-            # オブジェクトが Pydantic モデルの場合、専用メソッドで JSON 化する
+            # Serialize Pydantic models with the right method
             if hasattr(spec_data, "model_dump_json"):
-                # Pydantic v2用
+                # Pydantic v2
                 f.write(spec_data.model_dump_json(indent=2))
             elif hasattr(spec_data, "json"):
-                # Pydantic v1用 (互換性維持)
+                # Pydantic v1
                 f.write(spec_data.json(indent=2))
             else:
-                # ただの辞書(dict)なら標準ライブラリでOK
+                # Fallback for dict
                 json.dump(spec_data, f, indent=2, ensure_ascii=False)
                 
         print(f"    ✅ JSON Saved: {json_out_path}")
@@ -39,23 +38,23 @@ def _compile_system_spec(excel_path: str, json_out_path: str):
 
 def _compile_business_rules(excel_path: str, json_out_path: str):
     """
-    業務ルール (mail_business_rules.xlsx) のコンパイル
+    Compile business rules (mail_business_rules.xlsx).
     Returns: Pandas DataFrame -> List[Dict] -> JSON File
     """
-    print(f"📖 Business Rule解析: {excel_path}")
+    print(f"📖 Business Rule parse: {excel_path}")
     
     if not os.path.exists(excel_path):
         print(f"    ⚠️ File Not Found (Skip): {excel_path}")
         return
 
     try:
-        # Excel読込
+        # Read Excel
         df = pd.read_excel(excel_path)
         
-        # NaN (空欄) を None に置換してJSONでエラーにならないようにする
+        # Replace NaN with None for JSON
         df = df.where(pd.notnull(df), None)
         
-        # 辞書のリストに変換
+        # Convert to list[dict]
         rules_list = df.to_dict(orient='records')
         
         os.makedirs(os.path.dirname(json_out_path), exist_ok=True)
@@ -68,22 +67,22 @@ def _compile_business_rules(excel_path: str, json_out_path: str):
         print(f"    ⚠️ Rule Compile Error (Skip): {e}")
 
 # =========================================================
-# 🚀 Public Facade (Mainから呼ぶのはこれだけ)
+# Public Facade (Main calls this)
 # =========================================================
 
 def build_all_configs():
     """
-    プロジェクト内のすべてのExcel仕様書を探してJSONに変換する
+    Build all configs from Excel specs in the project.
     """
     print("🏗️  Building Configurations...")
 
-    # 1. システム仕様書 (Botの基本設定)
+    # 1. System spec (bot settings)
     _compile_system_spec(
         "specs/accounting/invoice_bot_v2.xlsx", 
         "configs/accounting/invoice_bot_v2.json"
     )
 
-    # 2. 業務ルール (メール振り分け設定)
+    # 2. Business rules (mail routing)
     _compile_business_rules(
         "specs/accounting/mail_business_rules.xlsx",
         "configs/accounting/mail_business_rules.json"

@@ -200,6 +200,11 @@ Run the web UI for rule editing and pipeline execution.
 streamlit run web_app.py
 ```
 
+### Windows Quick Start
+
+1. Run `setup_windows.bat` once.
+2. Run `run_web.bat` to start the app.
+
 Features:
 - Edit business rules (`configs/accounting/mail_business_rules.json`)
 - Run the pipeline as a background job

@@ -170,7 +170,7 @@ st.markdown(
 
 st.write("")
 
-tabs = st.tabs(["Overview", "Rules", "AI Rule Builder", "Quality Feedback", "Run"])
+tabs = st.tabs(["Overview", "Rules", "Design: Rule Builder", "Design: Intent Spec", "Run"])
 
 if "rules" not in st.session_state:
     existing_rules = load_rules(RULES_PATH)
@@ -248,8 +248,9 @@ with tabs[1]:
             st.rerun()
 
 with tabs[2]:
-    st.markdown("<div class='psb-label'>AI Rule Builder (Preview)</div>", unsafe_allow_html=True)
-    st.write("Skeleton UI for candidate generation flow. Current logic is connected at preview level.")
+    st.markdown("<div class='psb-label'>Design / Rule Builder</div>", unsafe_allow_html=True)
+    st.write("実行ログからルール候補を生成し、Rulesへ反映するための設計タブです。")
+    st.caption("Output: executable rule rows (subject_filter, action_id, etc.)")
 
     col_a, col_b, col_c = st.columns([1, 1, 1])
     with col_a:
@@ -354,8 +355,9 @@ with tabs[2]:
         render_skeleton_card("Candidate Rows Table", [92, 66, 82, 54])
 
 with tabs[3]:
-    st.markdown("<div class='psb-label'>Quality Intake</div>", unsafe_allow_html=True)
-    st.write("受付フォームから Intent Specification (IR) を生成し、実行に引き渡します。")
+    st.markdown("<div class='psb-label'>Design / Intent Specification</div>", unsafe_allow_html=True)
+    st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
+    st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
     col_a, col_b = st.columns([2, 1])
     with col_a:

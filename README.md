@@ -202,8 +202,31 @@ streamlit run web_app.py
 
 ### Windows Quick Start
 
-1. Run `setup_windows.bat` once.
-2. Run `run_web.bat` to start the app.
+1. Run `quickstart/setup_windows.bat` once.
+2. Run `quickstart/run_web.bat` to start the app.
+
+#### Manual Setup (Anaconda Prompt / PowerShell)
+
+If `conda` is not recognized in VS Code / PowerShell, use **Anaconda Prompt** or run the steps manually.
+
+1. Open **Anaconda Prompt**.
+2. Move to the repo folder.
+3. Create the environment:
+```bash
+conda env create -f environment.yml
+```
+4. Activate the environment:
+```bash
+conda activate pseudo-semantic-bridge
+```
+5. (Optional) Enable conda in PowerShell, then restart VS Code:
+```bash
+conda init powershell
+```
+6. Start the app:
+```bash
+streamlit run web_app.py
+```
 
 Features:
 - Edit business rules (`configs/accounting/mail_business_rules.json`)
@@ -213,7 +236,7 @@ Features:
 
 ## ⚡ Quick Start (Jupyter Notebook)
 
-Open **`quick_start.ipynb`** to visualize the flow step-by-step.
+Open **`quickstart/quick_start.ipynb`** to visualize the flow step-by-step.
 
 1. Create mock Excel specs.
 2. Compile them to JSON (observe the `configs/` folder creation).

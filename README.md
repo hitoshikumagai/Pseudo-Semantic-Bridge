@@ -202,12 +202,12 @@ streamlit run web_app.py
 
 ### Windows Quick Start
 
-1. Run `quickstart/setup_windows.bat` once.
-2. Run `quickstart/run_web.bat` to start the app.
+1. Run `quickstart/run_web.bat`.
+2. If the conda environment `pseudo-semantic-bridge` does not exist, it is created automatically from `environment.yml` on first run.
 
 #### Manual Setup (Anaconda Prompt / PowerShell)
 
-If `conda` is not recognized in VS Code / PowerShell, use **Anaconda Prompt** or run the steps manually.
+If `run_web.bat` cannot find `conda`, use **Anaconda Prompt** or run the steps manually.
 
 1. Open **Anaconda Prompt**.
 2. Move to the repo folder.

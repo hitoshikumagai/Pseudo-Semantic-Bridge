@@ -192,10 +192,24 @@ python main.py
 
 ---
 
+## 🌐 Web App Quick Start
+
+Run the web UI for rule editing and pipeline execution.
+
+```bash
+streamlit run web_app.py
+```
+
+Features:
+- Edit business rules (`configs/accounting/mail_business_rules.json`)
+- Run the pipeline as a background job
+
+---
+
 ## ⚡ Quick Start (Jupyter Notebook)
 
-Open **`sample copy.ipynb`** (or `quick_run.ipynb`) to visualize the flow step-by-step.
+Open **`quick_start.ipynb`** to visualize the flow step-by-step.
 
-* **Step 1:** Create mock Excel specs.
-* **Step 2:** Compile them to JSON (observe the `configs/` folder creation).
-* **Step 3:** Run the Engine and verify the output in `data/`.
+1. Create mock Excel specs.
+2. Compile them to JSON (observe the `configs/` folder creation).
+3. Run the Engine and verify the output in `data/`.

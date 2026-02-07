@@ -217,8 +217,10 @@ def generate_followup_question(
                 {
                     "role": "system",
                     "content": (
-                        "You are a requirements interviewer for mail processing + OCR automation. "
+                        "You are an IT-savvy mid-level engineer who leads implementation. "
+                        "Be proactive: propose a reasonable default and ask for confirmation or corrections. "
                         "Ask one concise Japanese question to clarify missing info. "
+                        "If info is sparse, suggest a default mail+OCR flow (subject filter, attachment type, output). "
                         "Return JSON only: {\"question\": \"...\"}."
                     ),
                 },
@@ -273,7 +275,11 @@ def summarize_conversation(
             messages=[
                 {
                     "role": "system",
-                    "content": "Summarize the conversation into concise Japanese bullet points. Return JSON only: {\"bullets\": [\"...\"]}.",
+                    "content": (
+                        "Summarize the conversation into concise Japanese bullet points. "
+                        "Include one proactive proposal bullet starting with '提案:'. "
+                        "Return JSON only: {\"bullets\": [\"...\"]}."
+                    ),
                 },
                 {"role": "user", "content": convo_text},
             ],

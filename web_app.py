@@ -586,16 +586,47 @@ with tabs[4]:
         if compile_summary.get("error"):
             st.warning(f"Compile error: {compile_summary.get('error')}")
 
+    # Always show global log view so notebook-triggered runs are visible in Web.
+    all_runs = load_jsonl_runs(LOGS_PATH)
+    global_summary = summarize_run_window(all_runs, start_index=0)
+    st.markdown("<div class='psb-label'>Global Run Summary (Jupyter + Web)</div>", unsafe_allow_html=True)
+    g1, g2, g3, g4 = st.columns(4)
+    with g1:
+        st.metric("Processed", global_summary["total"])
+    with g2:
+        st.metric("Success", global_summary["success"])
+    with g3:
+        st.metric("Error", global_summary["error"])
+    with g4:
+        st.metric("Artifacts", global_summary["with_output"])
+    if global_summary["workflows"]:
+        st.caption(f"Workflows: {', '.join(global_summary['workflows'])}")
+    if global_summary["latest_timestamp"]:
+        st.caption(f"Latest log time: {global_summary['latest_timestamp']}")
+    if global_summary["latest_error"]:
+        st.warning(f"Latest error: {global_summary['latest_error']}")
+
+    st.markdown("<div class='psb-label'>Global Run Detail</div>", unsafe_allow_html=True)
+    global_detail_rows = summarize_run_detail_rows(
+        all_runs,
+        start_index=0,
+        limit=100,
+    )
+    if global_detail_rows:
+        st.dataframe(global_detail_rows, use_container_width=True)
+    else:
+        st.info("No logs found yet.")
+
     last_job_id = st.session_state.get("last_job_id")
     if last_job_id and last_job_id in jobs:
         current_runs = load_jsonl_runs(LOGS_PATH)
         last_job = jobs[last_job_id]
         duration_sec = compute_job_duration_seconds(last_job)
+        st.markdown("<div class='psb-label'>Last Triggered Job Summary (Web only)</div>", unsafe_allow_html=True)
         summary = summarize_run_window(
             current_runs,
             start_index=int(last_job.get("log_start_index", 0)),
         )
-        st.markdown("<div class='psb-label'>Last Run Summary</div>", unsafe_allow_html=True)
         s1, s2, s3, s4 = st.columns(4)
         with s1:
             st.metric("Processed", summary["total"])
@@ -612,7 +643,7 @@ with tabs[4]:
         if summary["latest_error"]:
             st.warning(f"Latest error: {summary['latest_error']}")
 
-        st.markdown("<div class='psb-label'>Last Run Detail</div>", unsafe_allow_html=True)
+        st.markdown("<div class='psb-label'>Last Triggered Job Detail (Web only)</div>", unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
             st.caption(f"job_id: {last_job_id}")

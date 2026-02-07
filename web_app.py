@@ -10,7 +10,8 @@ from src.bridge.builder import build_all_configs
 from src.engine.core import GenericEtlEngine
 from src.web.app_logic import (
     analyze_and_log_user_instruction,
-    build_mail_rule_from_intent_spec,
+    append_unique_rules,
+    build_rule_proposals_from_intent_spec,
     compute_job_duration_seconds,
     generate_intent_spec,
     generate_intent_spec_from_summary,
@@ -19,6 +20,7 @@ from src.web.app_logic import (
     load_jsonl_runs,
     load_jsonl_runs_tail,
     load_rules,
+    merge_proposed_rules,
     propose_rule_candidates,
     run_bridge_compile_summary,
     run_engine_job,
@@ -32,6 +34,7 @@ from src.web.app_logic import (
 
 APP_TITLE = "Pseudo Semantic Bridge"
 RULES_PATH = Path("configs/accounting/mail_business_rules.json")
+PROPOSED_RULES_PATH = Path("configs/accounting/mail_rules_proposed.json")
 SYSTEM_CONFIG_PATH = Path("configs/accounting/invoice_bot_v2.json")
 LOGS_PATH = Path("data/logs/psb_run.jsonl")
 INTAKE_LOGS_PATH = Path("data/logs/intent_intake.jsonl")
@@ -189,6 +192,17 @@ def _dedupe_chunks(chunks: list[str]) -> list[str]:
     return unique
 
 
+def _strip_select(rows: list[dict]) -> list[dict]:
+    cleaned = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        row_copy = dict(row)
+        row_copy.pop("select", None)
+        cleaned.append(row_copy)
+    return cleaned
+
+
 def _record_perf(label: str, seconds: float, count: int) -> None:
     marks = st.session_state.get("perf_marks") or []
     marks.append((label, seconds, count))
@@ -253,6 +267,9 @@ if "rules" not in st.session_state:
             "parameters": {"lang": "jpn"},
         }
     ]
+
+if "proposed_rules" not in st.session_state:
+    st.session_state["proposed_rules"] = load_rules(PROPOSED_RULES_PATH)
 
 if "ai_meta" not in st.session_state:
     st.session_state["ai_meta"] = []
@@ -336,6 +353,71 @@ with tabs[1]:
         if st.button("Reload"):
             st.session_state["rules"] = load_rules(RULES_PATH)
             st.rerun()
+
+    st.write("")
+    st.markdown("<div class='psb-label'>Proposed Rules</div>", unsafe_allow_html=True)
+    st.caption(f"Proposed rules path: {PROPOSED_RULES_PATH}")
+    proposed_with_select = []
+    for row in st.session_state.get("proposed_rules") or []:
+        row_copy = dict(row)
+        row_copy["select"] = False
+        proposed_with_select.append(row_copy)
+    edited_proposed = st.data_editor(
+        proposed_with_select,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="proposed_rules_editor",
+    )
+    selected_indices = [idx for idx, row in enumerate(edited_proposed) if row.get("select")]
+    st.session_state["proposed_rules"] = _strip_select(edited_proposed)
+
+    merge_col_a, merge_col_b, merge_col_c = st.columns([1, 1, 1])
+    with merge_col_a:
+        merge_gate = st.number_input(
+            "Merge quality gate",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.8,
+            step=0.05,
+        )
+    with merge_col_b:
+        allow_low_quality = st.checkbox("Allow below gate", value=False)
+    with merge_col_c:
+        drop_metadata = st.checkbox("Drop rule metadata", value=True)
+
+    col_p1, col_p2, col_p3 = st.columns([1, 1, 1])
+    with col_p1:
+        if st.button("Save Proposed"):
+            save_rules(PROPOSED_RULES_PATH, st.session_state["proposed_rules"])
+            st.success("Proposed rules saved.")
+    with col_p2:
+        if st.button("Reload Proposed"):
+            st.session_state["proposed_rules"] = load_rules(PROPOSED_RULES_PATH)
+            st.rerun()
+    with col_p3:
+        if st.button("Merge Selected"):
+            if not selected_indices:
+                st.warning("No proposed rules selected.")
+            else:
+                merged_rules, remaining, summary = merge_proposed_rules(
+                    existing_rules=st.session_state["rules"],
+                    proposed_rules=st.session_state["proposed_rules"],
+                    selected_indices=selected_indices,
+                    min_quality_score_gate=float(merge_gate),
+                    allow_low_quality=allow_low_quality,
+                    drop_metadata=drop_metadata,
+                )
+                st.session_state["rules"] = merged_rules
+                st.session_state["proposed_rules"] = remaining
+                st.success(
+                    "Merged "
+                    f"{summary['merged']} rules "
+                    f"(skipped duplicates {summary['skipped_duplicates']}, "
+                    f"conflicts {summary['skipped_conflicts']}, "
+                    f"quality gate {summary['skipped_quality_gate']}, "
+                    f"invalid {summary['skipped_invalid']})."
+                )
+                st.rerun()
 
 with tabs[2]:
     st.markdown("<div class='psb-label'>Design / Rule Builder</div>", unsafe_allow_html=True)
@@ -759,17 +841,39 @@ with tabs[3]:
         st.session_state["mail_action_id"] = mail_action_id
         st.session_state["mail_params"] = mail_params
 
-        if st.button("Append Mail Rule To Rules", type="primary"):
+        proposal_gate = st.number_input(
+            "Proposal quality gate",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.8,
+            step=0.05,
+            key="proposal_quality_gate",
+        )
+        if st.button("Generate Proposed Rule", type="primary"):
             current_spec = st.session_state.get("intent_spec")
             if not current_spec:
                 st.warning("Intent Spec not generated yet.")
             else:
-                rule, rule_error = build_mail_rule_from_intent_spec(current_spec)
-                if rule_error:
-                    st.warning(rule_error)
+                proposals, warnings = build_rule_proposals_from_intent_spec(
+                    current_spec,
+                    min_quality_score_gate=float(proposal_gate),
+                )
+                for warning in warnings:
+                    st.warning(warning)
+                if not proposals:
+                    st.warning("No rule proposals generated from Intent Spec.")
                 else:
-                    st.session_state["rules"].append(rule)
-                    st.success("Rule appended to Rules (draft).")
+                    merged, summary = append_unique_rules(
+                        st.session_state.get("proposed_rules") or [],
+                        proposals,
+                    )
+                    st.session_state["proposed_rules"] = merged
+                    save_rules(PROPOSED_RULES_PATH, merged)
+                    st.success(
+                        f"Added {summary['added']} proposed rules "
+                        f"(skipped duplicates {summary['skipped_duplicates']}, "
+                        f"invalid {summary['skipped_invalid']})."
+                    )
                     st.rerun()
 
     st.write("")

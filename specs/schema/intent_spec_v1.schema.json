@@ -32,7 +32,42 @@
     },
     "inputs": {
       "type": "object",
-      "default": {}
+      "default": {},
+      "properties": {
+        "mail_rule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "subject_filter",
+            "action_id"
+          ],
+          "properties": {
+            "subject_filter": {
+              "type": "string",
+              "minLength": 1
+            },
+            "task_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "require_attachment": {
+              "type": "boolean",
+              "default": true
+            },
+            "target_ext": {
+              "type": "string"
+            },
+            "action_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "parameters": {
+              "type": "object",
+              "default": {}
+            }
+          }
+        }
+      }
     },
     "steps": {
       "type": "array",

@@ -403,6 +403,215 @@ def test_build_mail_rule_from_intent_spec_validates_required_fields():
     assert "subject_filter" in error
 
 
+def test_build_mail_rule_from_intent_spec_inferrs_from_steps():
+    spec = {
+        "spec_id": "spec-3",
+        "domain": "mail",
+        "intent": "ocr mail",
+        "inputs": {},
+        "steps": [
+            {"id": "s1", "action": "fetch_mails", "params": {"subject_filter": "Invoice"}},
+            {"id": "s2", "action": "extract_attachment", "params": {"ext": ".pdf"}},
+            {"id": "s3", "action": "ocr_process", "params": {"lang": "jpn"}},
+        ],
+        "verification": {"required_fields": [], "min_quality_score": 0.8},
+        "fallback": {"on_failure": "route_manual_review"},
+    }
+    rule, error = app_logic.build_mail_rule_from_intent_spec(spec)
+    assert error is None
+    assert rule["subject_filter"] == "Invoice"
+    assert rule["action_id"] == "ocr_process"
+    assert rule["target_ext"] == ".pdf"
+    assert rule["parameters"]["lang"] == "jpn"
+
+
+def test_build_rule_proposals_from_intent_spec_adds_metadata_and_warning():
+    spec = {
+        "spec_id": "spec-4",
+        "domain": "mail",
+        "intent": "ocr mail",
+        "inputs": {
+            "mail_rule": {
+                "subject_filter": "請求書",
+                "task_name": "INVOICE",
+                "require_attachment": True,
+                "action_id": "ocr_process",
+                "parameters": {"lang": "jpn"},
+            }
+        },
+        "steps": [{"id": "s1", "action": "fetch_mails", "params": {}}],
+        "verification": {"required_fields": [], "min_quality_score": 0.6},
+        "fallback": {"on_failure": "route_manual_review"},
+    }
+    proposals, warnings = app_logic.build_rule_proposals_from_intent_spec(spec, min_quality_score_gate=0.8)
+    assert len(proposals) == 1
+    assert warnings
+    assert proposals[0]["rule_source"]["spec_id"] == "spec-4"
+
+
+def test_merge_proposed_rules_respects_quality_gate_and_conflicts():
+    existing = [
+        {
+            "subject_filter": "Invoice",
+            "task_name": "INVOICE",
+            "require_attachment": True,
+            "action_id": "ocr_process",
+            "parameters": {},
+        }
+    ]
+    proposed = [
+        {
+            "subject_filter": "Invoice",
+            "task_name": "OTHER",
+            "require_attachment": True,
+            "action_id": "save_process",
+            "parameters": {},
+            "rule_source": {"quality_gate": 0.9},
+        },
+        {
+            "subject_filter": "Report",
+            "task_name": "REPORT",
+            "require_attachment": False,
+            "action_id": "save_process",
+            "parameters": {},
+            "rule_source": {"quality_gate": 0.6},
+        },
+        {
+            "subject_filter": "Estimate",
+            "task_name": "ESTIMATE",
+            "require_attachment": True,
+            "action_id": "save_process",
+            "parameters": {},
+            "rule_source": {"quality_gate": 0.9},
+        },
+    ]
+    merged, remaining, summary = app_logic.merge_proposed_rules(
+        existing_rules=existing,
+        proposed_rules=proposed,
+        selected_indices=[0, 1, 2],
+        min_quality_score_gate=0.8,
+        allow_low_quality=False,
+    )
+    assert summary["merged"] == 1
+    assert summary["skipped_conflicts"] == 1
+    assert summary["skipped_quality_gate"] == 1
+    assert len(merged) == 2
+    assert len(remaining) == 2
+
+
+def test_append_unique_rules_dedupes_by_key():
+    existing = [
+        {
+            "subject_filter": "Invoice",
+            "task_name": "INVOICE",
+            "require_attachment": True,
+            "action_id": "ocr_process",
+            "parameters": {},
+        }
+    ]
+    incoming = [
+        {
+            "subject_filter": "Invoice",
+            "task_name": "INVOICE",
+            "require_attachment": True,
+            "action_id": "ocr_process",
+            "parameters": {},
+        },
+        {
+            "subject_filter": "Report",
+            "task_name": "REPORT",
+            "require_attachment": False,
+            "action_id": "save_process",
+            "parameters": {},
+        },
+    ]
+    merged, summary = app_logic.append_unique_rules(existing, incoming)
+    assert summary["added"] == 1
+    assert summary["skipped_duplicates"] == 1
+    assert len(merged) == 2
+
+
+def test_append_unique_rules_skips_invalid():
+    existing = []
+    incoming = [{"subject_filter": "Invoice"}]
+    merged, summary = app_logic.append_unique_rules(existing, incoming)
+    assert merged == []
+    assert summary["skipped_invalid"] == 1
+
+
+def test_merge_proposed_rules_allows_low_quality_when_flag_true():
+    existing = []
+    proposed = [
+        {
+            "subject_filter": "Report",
+            "task_name": "REPORT",
+            "require_attachment": False,
+            "action_id": "save_process",
+            "parameters": {},
+            "rule_source": {"quality_gate": 0.5},
+        }
+    ]
+    merged, remaining, summary = app_logic.merge_proposed_rules(
+        existing_rules=existing,
+        proposed_rules=proposed,
+        selected_indices=[0],
+        min_quality_score_gate=0.8,
+        allow_low_quality=True,
+    )
+    assert summary["merged"] == 1
+    assert remaining == []
+
+
+def test_merge_proposed_rules_drops_metadata_by_default():
+    existing = []
+    proposed = [
+        {
+            "subject_filter": "Estimate",
+            "task_name": "ESTIMATE",
+            "require_attachment": True,
+            "action_id": "save_process",
+            "parameters": {},
+            "rule_source": {"quality_gate": 0.9},
+        }
+    ]
+    merged, remaining, summary = app_logic.merge_proposed_rules(
+        existing_rules=existing,
+        proposed_rules=proposed,
+        selected_indices=[0],
+        min_quality_score_gate=0.8,
+        allow_low_quality=False,
+        drop_metadata=True,
+    )
+    assert summary["merged"] == 1
+    assert "rule_source" not in merged[0]
+    assert remaining == []
+
+
+def test_merge_proposed_rules_keeps_metadata_when_requested():
+    existing = []
+    proposed = [
+        {
+            "subject_filter": "Estimate",
+            "task_name": "ESTIMATE",
+            "require_attachment": True,
+            "action_id": "save_process",
+            "parameters": {},
+            "rule_source": {"quality_gate": 0.9},
+        }
+    ]
+    merged, remaining, summary = app_logic.merge_proposed_rules(
+        existing_rules=existing,
+        proposed_rules=proposed,
+        selected_indices=[0],
+        min_quality_score_gate=0.8,
+        allow_low_quality=False,
+        drop_metadata=False,
+    )
+    assert summary["merged"] == 1
+    assert merged[0]["rule_source"]["quality_gate"] == 0.9
+    assert remaining == []
+
+
 def test_normalize_intent_spec_fills_missing_action():
     template = app_logic._build_template_spec(
         app_context="メール",

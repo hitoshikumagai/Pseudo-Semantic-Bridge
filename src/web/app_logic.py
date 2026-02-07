@@ -25,6 +25,9 @@ from src.web.services.rules_service import (
     parse_rules_input,
     propose_rule_candidates,
     build_mail_rule_from_intent_spec,
+    append_unique_rules,
+    build_rule_proposals_from_intent_spec,
+    merge_proposed_rules,
 )
 from src.web.services.quality_service import (
     parse_feedback_input,
@@ -71,6 +74,9 @@ __all__ = [
     "parse_rules_input",
     "propose_rule_candidates",
     "build_mail_rule_from_intent_spec",
+    "append_unique_rules",
+    "build_rule_proposals_from_intent_spec",
+    "merge_proposed_rules",
     "parse_feedback_input",
     "run_rule_check",
     "run_workflow_improvement",

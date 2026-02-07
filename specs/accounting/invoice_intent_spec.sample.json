@@ -5,7 +5,16 @@
   "intent": "請求書メールをOCRして保存し、処理結果を検証する",
   "inputs": {
     "mailbox": "accounting@company.com",
-    "lookback_days": 7
+    "lookback_days": 7,
+    "mail_rule": {
+      "subject_filter": "Invoice",
+      "task_name": "INVOICE",
+      "require_attachment": true,
+      "action_id": "ocr_process",
+      "parameters": {
+        "lang": "jpn"
+      }
+    }
   },
   "steps": [
     {

@@ -135,6 +135,28 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.load_jsonl_runs_tail = lambda _path, max_lines=200: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     fake_app_logic.save_rules = lambda *_args, **_kwargs: None
+    fake_app_logic.append_unique_rules = (
+        lambda existing, incoming: (
+            (existing or []) + (incoming or []),
+            {"added": len(incoming or []), "skipped_duplicates": 0, "skipped_invalid": 0},
+        )
+    )
+    fake_app_logic.build_rule_proposals_from_intent_spec = (
+        lambda *_args, **_kwargs: ([], [])
+    )
+    fake_app_logic.merge_proposed_rules = (
+        lambda existing_rules, proposed_rules, **_kwargs: (
+            existing_rules or [],
+            proposed_rules or [],
+            {
+                "merged": 0,
+                "skipped_duplicates": 0,
+                "skipped_conflicts": 0,
+                "skipped_invalid": 0,
+                "skipped_quality_gate": 0,
+            },
+        )
+    )
     fake_app_logic.analyze_and_log_user_instruction = (
         lambda **_kwargs: (
             {

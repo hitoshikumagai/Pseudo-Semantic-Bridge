@@ -12,6 +12,9 @@ from src.web.app_logic import (
     build_mail_rule_from_intent_spec,
     compute_job_duration_seconds,
     generate_intent_spec,
+    generate_intent_spec_from_summary,
+    generate_followup_question,
+    summarize_conversation,
     load_jsonl_runs,
     load_jsonl_runs_tail,
     load_rules,
@@ -211,6 +214,16 @@ if "instruction_intake" not in st.session_state:
 
 if "compile_summary" not in st.session_state:
     st.session_state["compile_summary"] = None
+if "conversation_log" not in st.session_state:
+    st.session_state["conversation_log"] = []
+if "conversation_rounds" not in st.session_state:
+    st.session_state["conversation_rounds"] = 0
+if "conversation_allow_more" not in st.session_state:
+    st.session_state["conversation_allow_more"] = False
+if "conversation_summary" not in st.session_state:
+    st.session_state["conversation_summary"] = []
+if "conversation_focus" not in st.session_state:
+    st.session_state["conversation_focus"] = None
 
 with tabs[0]:
     runs = load_jsonl_runs(LOGS_PATH)
@@ -410,6 +423,74 @@ with tabs[3]:
     st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
+    st.markdown("<div class='psb-label'>Conversation Assist</div>", unsafe_allow_html=True)
+    if st.session_state["conversation_log"]:
+        for entry in st.session_state["conversation_log"]:
+            role = entry.get("role", "user")
+            content = entry.get("content", "")
+            st.markdown(f"**{role}**: {content}")
+    else:
+        st.caption("Conversation log is empty.")
+
+    convo_input = st.text_area("User message", placeholder="やりたいことを短く入力してください", height=80)
+    convo_col_a, convo_col_b, convo_col_c = st.columns([1, 1, 1])
+    with convo_col_a:
+        if st.button("Add Message"):
+            if convo_input.strip():
+                st.session_state["conversation_log"].append({"role": "user", "content": convo_input.strip()})
+                st.rerun()
+            else:
+                st.warning("User message is empty.")
+    with convo_col_b:
+        allow_more_needed = st.session_state["conversation_rounds"] >= 3 and not st.session_state["conversation_allow_more"]
+        if allow_more_needed:
+            st.info("質問は3回まで。さらに必要なら許可してください。")
+            if st.button("Allow More Questions"):
+                st.session_state["conversation_allow_more"] = True
+                st.rerun()
+        else:
+            if st.button("Ask Next Question (AI)"):
+                question, error, source = generate_followup_question(
+                    conversation=st.session_state["conversation_log"],
+                    domain_hint="accounting_mail_invoice",
+                    use_ai=True,
+                    model="gpt-4o-mini",
+                    round_index=st.session_state["conversation_rounds"],
+                )
+                if error:
+                    st.warning(error)
+                st.session_state["conversation_log"].append({"role": "assistant", "content": question})
+                st.session_state["conversation_rounds"] += 1
+                st.rerun()
+    with convo_col_c:
+        if st.button("Reset Conversation"):
+            st.session_state["conversation_log"] = []
+            st.session_state["conversation_rounds"] = 0
+            st.session_state["conversation_allow_more"] = False
+            st.session_state["conversation_summary"] = []
+            st.session_state["conversation_focus"] = None
+            st.rerun()
+
+    if st.button("Summarize Conversation"):
+        summary, error, source = summarize_conversation(
+            conversation=st.session_state["conversation_log"],
+            use_ai=True,
+            model="gpt-4o-mini",
+        )
+        if error:
+            st.warning(error)
+        st.session_state["conversation_summary"] = summary
+        st.session_state["conversation_focus"] = None
+
+    summary_bullets = st.session_state.get("conversation_summary") or []
+    if summary_bullets:
+        st.markdown("<div class='psb-label'>Summary (Bullet)</div>", unsafe_allow_html=True)
+        for bullet in summary_bullets:
+            st.write(f"- {bullet}")
+        focus_choice = st.selectbox("興味のあるポイントを選択", summary_bullets)
+        if st.button("Confirm Focus"):
+            st.session_state["conversation_focus"] = focus_choice
+
     col_a, col_b = st.columns([2, 1])
     with col_a:
         app_context = st.text_input(
@@ -541,6 +622,34 @@ with tabs[3]:
         st.session_state["intent_spec_source"] = source
         st.session_state["intent_spec_error"] = error
         st.success("Intent Spec generated from template.")
+
+    if st.button("Intent Spec 生成 (Conversation)", type="primary"):
+        focus = st.session_state.get("conversation_focus")
+        if not focus:
+            st.warning("Focus is not confirmed yet.")
+        else:
+            spec, error, source = generate_intent_spec_from_summary(
+                summary_bullets=st.session_state.get("conversation_summary") or [],
+                focus=focus,
+                use_ai=True,
+                model=llm_model,
+            )
+            spec_inputs = spec.get("inputs") or {}
+            spec_inputs["mail_rule"] = {
+                "subject_filter": mail_subject_filter,
+                "task_name": mail_task_name,
+                "require_attachment": mail_require_attachment,
+                "action_id": mail_action_id,
+                "parameters": mail_params,
+            }
+            spec["inputs"] = spec_inputs
+            st.session_state["intent_spec"] = spec
+            st.session_state["intent_spec_source"] = source
+            st.session_state["intent_spec_error"] = error
+            if error:
+                st.warning(error)
+            else:
+                st.success("Intent Spec generated from conversation.")
 
     st.write("")
     st.markdown("<div class='psb-label'>Intent Specification (IR)</div>", unsafe_allow_html=True)

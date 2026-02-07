@@ -149,6 +149,28 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.build_mail_rule_from_intent_spec = (
         lambda _spec: ({"subject_filter": "Invoice", "task_name": "INVOICE", "require_attachment": True, "action_id": "ocr_process", "parameters": {}}, None)
     )
+    fake_app_logic.generate_followup_question = (
+        lambda **_kwargs: ("質問ですか？", None, "template")
+    )
+    fake_app_logic.summarize_conversation = (
+        lambda **_kwargs: (["目的: 請求書をOCR"], None, "template")
+    )
+    fake_app_logic.generate_intent_spec_from_summary = (
+        lambda **_kwargs: (
+            {
+                "spec_id": "spec-summary",
+                "spec_version": "1.0",
+                "domain": "accounting_mail_invoice",
+                "intent": "summary",
+                "inputs": {},
+                "steps": [{"id": "s1", "action": "fetch_mails", "params": {}}],
+                "verification": {"required_fields": [], "min_quality_score": 0.8},
+                "fallback": {"on_failure": "route_manual_review"},
+            },
+            None,
+            "template",
+        )
+    )
     fake_app_logic.compute_job_duration_seconds = lambda _job: 0.1
     fake_app_logic.summarize_run_window = (
         lambda runs, start_index=0: {

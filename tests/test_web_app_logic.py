@@ -403,6 +403,60 @@ def test_build_mail_rule_from_intent_spec_validates_required_fields():
     assert "subject_filter" in error
 
 
+def test_normalize_intent_spec_fills_missing_action():
+    template = app_logic._build_template_spec(
+        app_context="メール",
+        goal="OCR",
+        scope="",
+        success="",
+        artifacts="",
+    )
+    ai_spec = {
+        "spec_id": "spec-x",
+        "domain": "mail",
+        "intent": "OCR",
+        "steps": [
+            {"id": "step_1", "description": "PDFの文字をOCRで抽出する"},
+            {"id": "step_2", "description": "結果を保存する"},
+        ],
+    }
+    normalized = app_logic._normalize_intent_spec(ai_spec, template)
+    assert normalized["steps"][0]["action"] == "ocr_process"
+    assert normalized["steps"][1]["action"] == "save_result"
+
+
+def test_generate_followup_question_template_mode():
+    question, error, source = app_logic.generate_followup_question(
+        conversation=[{"role": "user", "content": "請求書をOCRしたい"}],
+        use_ai=False,
+        round_index=1,
+    )
+    assert source == "template"
+    assert error is None
+    assert "添付" in question or "OCR" in question
+
+
+def test_summarize_conversation_template_mode():
+    summary, error, source = app_logic.summarize_conversation(
+        conversation=[{"role": "user", "content": "請求書をOCRして保存したい"}],
+        use_ai=False,
+    )
+    assert source == "template"
+    assert error is None
+    assert summary
+
+
+def test_generate_intent_spec_from_summary_template_mode():
+    spec, error, source = app_logic.generate_intent_spec_from_summary(
+        summary_bullets=["目的: 請求書をOCRして保存"],
+        focus="目的: 請求書をOCRして保存",
+        use_ai=False,
+    )
+    assert source == "template"
+    assert error is None
+    assert spec["spec_version"] == "1.0"
+
+
 def test_run_rule_check_detects_missing_keys_and_feedback_hints():
     feedback = {"raw": "slow and fail"}
     rules = [{"subject_filter": "invoice"}, {"action_id": "save_only"}]

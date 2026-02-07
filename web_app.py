@@ -4,7 +4,6 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.adapter.outlook import OutlookAdapter
 from src.bridge.builder import build_all_configs
 from src.engine.core import GenericEtlEngine
 from src.web.app_logic import (
@@ -34,6 +33,14 @@ RULES_PATH = Path("configs/accounting/mail_business_rules.json")
 SYSTEM_CONFIG_PATH = Path("configs/accounting/invoice_bot_v2.json")
 LOGS_PATH = Path("data/logs/psb_run.jsonl")
 INTAKE_LOGS_PATH = Path("data/logs/intent_intake.jsonl")
+OUTLOOK_IMPORT_ERROR = None
+OutlookAdapter = None
+
+try:
+    from src.adapter.outlook import OutlookAdapter as _OutlookAdapter
+    OutlookAdapter = _OutlookAdapter
+except Exception as exc:
+    OUTLOOK_IMPORT_ERROR = exc
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -731,6 +738,9 @@ with tabs[4]:
                 st.error(f"Bridge compile failed: {compile_summary.get('error')}")
     with run_col_b:
         if st.button("Run Pipeline"):
+            if OutlookAdapter is None:
+                st.error(f"Outlook adapter is unavailable: {OUTLOOK_IMPORT_ERROR}")
+                st.stop()
             baseline_count = len(load_jsonl_runs(LOGS_PATH))
             current_spec = st.session_state.get("intent_spec") or {}
 

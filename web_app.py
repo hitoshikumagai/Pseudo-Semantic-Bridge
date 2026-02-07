@@ -423,6 +423,17 @@ with tabs[3]:
     st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
+    llm_model = st.session_state.get("intent_llm_model", "gpt-4o-mini")
+
+    mail_subject_filter = st.session_state.get("mail_subject_filter", "請求書")
+    mail_task_name = st.session_state.get("mail_task_name", "INVOICE")
+    mail_require_attachment = st.session_state.get("mail_require_attachment", True)
+    mail_action_id = st.session_state.get("mail_action_id", "ocr_process")
+    mail_params = st.session_state.get("mail_params", {"lang": "jpn"})
+    if not isinstance(mail_params, dict):
+        mail_params = {}
+
+    st.markdown("<div class='psb-label'>Minimal Flow</div>", unsafe_allow_html=True)
     st.markdown("<div class='psb-label'>Conversation Assist</div>", unsafe_allow_html=True)
     if st.session_state["conversation_log"]:
         for entry in st.session_state["conversation_log"]:
@@ -454,7 +465,7 @@ with tabs[3]:
                     conversation=st.session_state["conversation_log"],
                     domain_hint="accounting_mail_invoice",
                     use_ai=True,
-                    model="gpt-4o-mini",
+                    model=llm_model,
                     round_index=st.session_state["conversation_rounds"],
                 )
                 if error:
@@ -475,7 +486,7 @@ with tabs[3]:
         summary, error, source = summarize_conversation(
             conversation=st.session_state["conversation_log"],
             use_ai=True,
-            model="gpt-4o-mini",
+            model=llm_model,
         )
         if error:
             st.warning(error)
@@ -490,138 +501,6 @@ with tabs[3]:
         focus_choice = st.selectbox("興味のあるポイントを選択", summary_bullets)
         if st.button("Confirm Focus"):
             st.session_state["conversation_focus"] = focus_choice
-
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        app_context = st.text_input(
-            "対象アプリ/領域",
-            value="メール",
-            help="例: メール, 受発注, 請求書管理",
-        )
-        goal = st.text_area(
-            "何がしたい？（目的）",
-            placeholder="例: 添付の写真から文字抽出して、処理フローに組み込みたい",
-            height=100,
-        )
-        scope = st.text_area(
-            "想定シナリオ/制約",
-            placeholder="例: まずは単体で出来栄えを見たい。機密情報あり。",
-            height=100,
-        )
-        success = st.text_area(
-            "成功条件/評価基準",
-            placeholder="例: 95%の抽出精度、3秒以内の処理",
-            height=80,
-        )
-
-    with col_b:
-        st.markdown("<div class='psb-label'>進め方</div>", unsafe_allow_html=True)
-        path = st.radio(
-            "どの形で検証する？",
-            ["まずは単体の出来栄えを見る", "ワークフローに組み込みたい"],
-        )
-        customization = st.radio(
-            "ユーザーが自分でやってよい範囲",
-            ["簡単な開発/カスタムはユーザーに任せる", "基本は運用チームで対応"],
-        )
-        st.markdown("<div class='psb-label' style='margin-top:12px'>任意情報</div>", unsafe_allow_html=True)
-        artifacts = st.text_area(
-            "参考情報（任意）",
-            placeholder="例: 既存ルール、ログ、サンプル画像の説明",
-            height=120,
-        )
-
-    st.markdown("<div class='psb-label'>Mail Rule Mapping</div>", unsafe_allow_html=True)
-    rule_col_a, rule_col_b, rule_col_c = st.columns([1, 1, 1])
-    with rule_col_a:
-        mail_subject_filter = st.text_input("Mail subject filter", value="請求書")
-    with rule_col_b:
-        mail_task_name = st.text_input("Mail task name", value="INVOICE")
-    with rule_col_c:
-        mail_require_attachment = st.checkbox("Require attachment", value=True)
-
-    rule_col_d, rule_col_e = st.columns([1, 1])
-    with rule_col_d:
-        mail_action_id = st.selectbox("Action (mail rule)", ["ocr_process", "save_process", "unzip_process"])
-    with rule_col_e:
-        mail_params_raw = st.text_area(
-            "Action parameters (JSON)",
-            value='{"lang": "jpn"}' if mail_action_id == "ocr_process" else "{}",
-            height=80,
-        )
-
-    mail_params = {}
-    if mail_params_raw.strip():
-        try:
-            mail_params = json.loads(mail_params_raw)
-        except json.JSONDecodeError:
-            st.warning("Action parameters JSON is invalid. Using empty parameters.")
-            mail_params = {}
-
-    col_c, col_d = st.columns([1, 1])
-    with col_c:
-        if st.button("受付内容を保存"):
-            st.session_state["quality_intake"] = {
-                "app_context": app_context,
-                "goal": goal,
-                "scope": scope,
-                "success": success,
-                "path": path,
-                "customization": customization,
-                "artifacts": artifacts,
-            }
-            st.success("受付内容を保存しました。")
-    with col_d:
-        llm_model = st.text_input("OpenAI model", value="gpt-4o-mini")
-        if st.button("Intent Spec 生成 (AI)", type="primary"):
-            spec, error, source = generate_intent_spec(
-                app_context=app_context,
-                goal=goal,
-                scope=scope,
-                success=success,
-                artifacts=artifacts,
-                use_ai=True,
-                model=llm_model,
-            )
-            spec_inputs = spec.get("inputs") or {}
-            spec_inputs["mail_rule"] = {
-                "subject_filter": mail_subject_filter,
-                "task_name": mail_task_name,
-                "require_attachment": mail_require_attachment,
-                "action_id": mail_action_id,
-                "parameters": mail_params,
-            }
-            spec["inputs"] = spec_inputs
-            st.session_state["intent_spec"] = spec
-            st.session_state["intent_spec_source"] = source
-            st.session_state["intent_spec_error"] = error
-            if error:
-                st.warning(error)
-            else:
-                st.success("Intent Spec generated by AI.")
-
-    if st.button("Intent Spec 生成 (Template)"):
-        spec, error, source = generate_intent_spec(
-            app_context=app_context,
-            goal=goal,
-            scope=scope,
-            success=success,
-            artifacts=artifacts,
-            use_ai=False,
-        )
-        spec_inputs = spec.get("inputs") or {}
-        spec_inputs["mail_rule"] = {
-            "subject_filter": mail_subject_filter,
-            "task_name": mail_task_name,
-            "require_attachment": mail_require_attachment,
-            "action_id": mail_action_id,
-            "parameters": mail_params,
-        }
-        spec["inputs"] = spec_inputs
-        st.session_state["intent_spec"] = spec
-        st.session_state["intent_spec_source"] = source
-        st.session_state["intent_spec_error"] = error
-        st.success("Intent Spec generated from template.")
 
     if st.button("Intent Spec 生成 (Conversation)", type="primary"):
         focus = st.session_state.get("conversation_focus")
@@ -651,6 +530,163 @@ with tabs[3]:
             else:
                 st.success("Intent Spec generated from conversation.")
 
+    with st.expander("Advanced Inputs", expanded=False):
+        llm_model = st.text_input("OpenAI model", value=llm_model)
+        st.session_state["intent_llm_model"] = llm_model
+        col_a, col_b = st.columns([2, 1])
+        with col_a:
+            app_context = st.text_input(
+                "対象アプリ/領域",
+                value="メール",
+                help="例: メール, 受発注, 請求書管理",
+            )
+            goal = st.text_area(
+                "何がしたい？（目的）",
+                placeholder="例: 添付の写真から文字抽出して、処理フローに組み込みたい",
+                height=100,
+            )
+            scope = st.text_area(
+                "想定シナリオ/制約",
+                placeholder="例: まずは単体で出来栄えを見たい。機密情報あり。",
+                height=100,
+            )
+            success = st.text_area(
+                "成功条件/評価基準",
+                placeholder="例: 95%の抽出精度、3秒以内の処理",
+                height=80,
+            )
+        with col_b:
+            st.markdown("<div class='psb-label'>進め方</div>", unsafe_allow_html=True)
+            path = st.radio(
+                "どの形で検証する？",
+                ["まずは単体の出来栄えを見る", "ワークフローに組み込みたい"],
+            )
+            customization = st.radio(
+                "ユーザーが自分でやってよい範囲",
+                ["簡単な開発/カスタムはユーザーに任せる", "基本は運用チームで対応"],
+            )
+            st.markdown("<div class='psb-label' style='margin-top:12px'>任意情報</div>", unsafe_allow_html=True)
+            artifacts = st.text_area(
+                "参考情報（任意）",
+                placeholder="例: 既存ルール、ログ、サンプル画像の説明",
+                height=120,
+            )
+
+        col_c, col_d = st.columns([1, 1])
+        with col_c:
+            if st.button("受付内容を保存"):
+                st.session_state["quality_intake"] = {
+                    "app_context": app_context,
+                    "goal": goal,
+                    "scope": scope,
+                    "success": success,
+                    "path": path,
+                    "customization": customization,
+                    "artifacts": artifacts,
+                }
+                st.success("受付内容を保存しました。")
+        with col_d:
+            if st.button("Intent Spec 生成 (AI)"):
+                spec, error, source = generate_intent_spec(
+                    app_context=app_context,
+                    goal=goal,
+                    scope=scope,
+                    success=success,
+                    artifacts=artifacts,
+                    use_ai=True,
+                    model=llm_model,
+                )
+                spec_inputs = spec.get("inputs") or {}
+                spec_inputs["mail_rule"] = {
+                    "subject_filter": mail_subject_filter,
+                    "task_name": mail_task_name,
+                    "require_attachment": mail_require_attachment,
+                    "action_id": mail_action_id,
+                    "parameters": mail_params,
+                }
+                spec["inputs"] = spec_inputs
+                st.session_state["intent_spec"] = spec
+                st.session_state["intent_spec_source"] = source
+                st.session_state["intent_spec_error"] = error
+                if error:
+                    st.warning(error)
+                else:
+                    st.success("Intent Spec generated by AI.")
+
+        if st.button("Intent Spec 生成 (Template)"):
+            spec, error, source = generate_intent_spec(
+                app_context=app_context,
+                goal=goal,
+                scope=scope,
+                success=success,
+                artifacts=artifacts,
+                use_ai=False,
+            )
+            spec_inputs = spec.get("inputs") or {}
+            spec_inputs["mail_rule"] = {
+                "subject_filter": mail_subject_filter,
+                "task_name": mail_task_name,
+                "require_attachment": mail_require_attachment,
+                "action_id": mail_action_id,
+                "parameters": mail_params,
+            }
+            spec["inputs"] = spec_inputs
+            st.session_state["intent_spec"] = spec
+            st.session_state["intent_spec_source"] = source
+            st.session_state["intent_spec_error"] = error
+            st.success("Intent Spec generated from template.")
+
+    with st.expander("Mail Rule Mapping (Optional)", expanded=False):
+        rule_col_a, rule_col_b, rule_col_c = st.columns([1, 1, 1])
+        with rule_col_a:
+            mail_subject_filter = st.text_input("Mail subject filter", value=mail_subject_filter)
+        with rule_col_b:
+            mail_task_name = st.text_input("Mail task name", value=mail_task_name)
+        with rule_col_c:
+            mail_require_attachment = st.checkbox("Require attachment", value=mail_require_attachment)
+        rule_col_d, rule_col_e = st.columns([1, 1])
+        with rule_col_d:
+            mail_action_id = st.selectbox(
+                "Action (mail rule)",
+                ["ocr_process", "save_process", "unzip_process"],
+                index=["ocr_process", "save_process", "unzip_process"].index(mail_action_id)
+                if mail_action_id in {"ocr_process", "save_process", "unzip_process"}
+                else 0,
+            )
+        with rule_col_e:
+            mail_params_raw = st.text_area(
+                "Action parameters (JSON)",
+                value=json.dumps(mail_params or {}, ensure_ascii=False),
+                height=80,
+            )
+
+        mail_params = {}
+        if mail_params_raw.strip():
+            try:
+                mail_params = json.loads(mail_params_raw)
+            except json.JSONDecodeError:
+                st.warning("Action parameters JSON is invalid. Using empty parameters.")
+                mail_params = {}
+
+        st.session_state["mail_subject_filter"] = mail_subject_filter
+        st.session_state["mail_task_name"] = mail_task_name
+        st.session_state["mail_require_attachment"] = mail_require_attachment
+        st.session_state["mail_action_id"] = mail_action_id
+        st.session_state["mail_params"] = mail_params
+
+        if st.button("Append Mail Rule To Rules", type="primary"):
+            current_spec = st.session_state.get("intent_spec")
+            if not current_spec:
+                st.warning("Intent Spec not generated yet.")
+            else:
+                rule, rule_error = build_mail_rule_from_intent_spec(current_spec)
+                if rule_error:
+                    st.warning(rule_error)
+                else:
+                    st.session_state["rules"].append(rule)
+                    st.success("Rule appended to Rules (draft).")
+                    st.rerun()
+
     st.write("")
     st.markdown("<div class='psb-label'>Intent Specification (IR)</div>", unsafe_allow_html=True)
     if st.session_state["intent_spec"]:
@@ -665,19 +701,6 @@ with tabs[3]:
 
     if st.session_state.get("quality_intake"):
         st.json(st.session_state["quality_intake"])
-
-    if st.button("Append Mail Rule To Rules", type="primary"):
-        current_spec = st.session_state.get("intent_spec")
-        if not current_spec:
-            st.warning("Intent Spec not generated yet.")
-        else:
-            rule, rule_error = build_mail_rule_from_intent_spec(current_spec)
-            if rule_error:
-                st.warning(rule_error)
-            else:
-                st.session_state["rules"].append(rule)
-                st.success("Rule appended to Rules (draft).")
-                st.rerun()
 
 with tabs[4]:
     jobs = st.session_state.setdefault("jobs", {})

@@ -62,6 +62,9 @@ class _FakeStreamlit(types.ModuleType):
     def selectbox(self, label, options, **kwargs):
         return options[0]
 
+    def expander(self, label, **kwargs):
+        return _DummyContext()
+
     def radio(self, label, options, **kwargs):
         return options[0]
 

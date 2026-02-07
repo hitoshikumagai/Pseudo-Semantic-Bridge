@@ -2,6 +2,7 @@ import os
 import json
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from src.catalog import register_processor
@@ -17,6 +18,26 @@ PROCESSOR_MAP = {
     "unzip_process": unzip_file
 }
 
+def _resolve_rule_file_path(rule_file_path: str) -> str:
+    if not rule_file_path:
+        return rule_file_path
+    candidate = Path(rule_file_path)
+    if candidate.is_absolute() and candidate.exists():
+        return str(candidate)
+    # Try current working directory
+    cwd_candidate = (Path.cwd() / candidate).resolve()
+    if cwd_candidate.exists():
+        return str(cwd_candidate)
+    # Try repo root inferred from this file: src/catalog/workflows/mail_router.py
+    try:
+        repo_root = Path(__file__).resolve().parents[3]
+        repo_candidate = (repo_root / candidate).resolve()
+        if repo_candidate.exists():
+            return str(repo_candidate)
+    except Exception:
+        pass
+    return rule_file_path
+
 @register_processor("mail_workflow")
 def mail_workflow(*args, **kwargs):
     item = args[0]
@@ -25,6 +46,7 @@ def mail_workflow(*args, **kwargs):
     
     # Read rule file path
     rule_file_path = params.get("rule_file")
+    rule_file_path = _resolve_rule_file_path(rule_file_path)
     
     if not rule_file_path or not os.path.exists(rule_file_path):
         print(f"      ⚠️ Rule file not found: {rule_file_path}")

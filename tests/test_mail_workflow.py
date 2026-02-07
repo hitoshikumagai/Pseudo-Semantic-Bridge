@@ -53,6 +53,27 @@ def test_mail_workflow_rule_match_and_saves_body(tmp_path):
     assert item.saved_to == str(tmp_path / "REPORT")
 
 
+def test_mail_workflow_resolves_relative_rule_path_from_cwd(tmp_path, monkeypatch):
+    rules_path = tmp_path / "rules.json"
+    _write_rules(
+        rules_path,
+        [
+            {
+                "subject_filter": "Report",
+                "task_name": "REPORT",
+                "action_id": "save_process",
+                "require_attachment": False,
+            }
+        ],
+    )
+
+    monkeypatch.chdir(tmp_path)
+    item = DummyItem("Daily Report")
+    mail_workflow(item, str(tmp_path), {"rule_file": "rules.json"})
+
+    assert item.saved_to == str(tmp_path / "REPORT")
+
+
 def test_mail_workflow_requires_attachment_skips(tmp_path):
     rules_path = tmp_path / "rules.json"
     _write_rules(

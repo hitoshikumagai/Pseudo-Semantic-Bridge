@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from src.bridge.builder import build_all_configs
 from src.engine.core import GenericEtlEngine
 from src.web.app_logic import (
     analyze_and_log_user_instruction,
+    build_mail_rule_from_intent_spec,
     compute_job_duration_seconds,
     generate_intent_spec,
     load_jsonl_runs,
@@ -448,6 +450,33 @@ with tabs[3]:
             height=120,
         )
 
+    st.markdown("<div class='psb-label'>Mail Rule Mapping</div>", unsafe_allow_html=True)
+    rule_col_a, rule_col_b, rule_col_c = st.columns([1, 1, 1])
+    with rule_col_a:
+        mail_subject_filter = st.text_input("Mail subject filter", value="請求書")
+    with rule_col_b:
+        mail_task_name = st.text_input("Mail task name", value="INVOICE")
+    with rule_col_c:
+        mail_require_attachment = st.checkbox("Require attachment", value=True)
+
+    rule_col_d, rule_col_e = st.columns([1, 1])
+    with rule_col_d:
+        mail_action_id = st.selectbox("Action (mail rule)", ["ocr_process", "save_process", "unzip_process"])
+    with rule_col_e:
+        mail_params_raw = st.text_area(
+            "Action parameters (JSON)",
+            value='{"lang": "jpn"}' if mail_action_id == "ocr_process" else "{}",
+            height=80,
+        )
+
+    mail_params = {}
+    if mail_params_raw.strip():
+        try:
+            mail_params = json.loads(mail_params_raw)
+        except json.JSONDecodeError:
+            st.warning("Action parameters JSON is invalid. Using empty parameters.")
+            mail_params = {}
+
     col_c, col_d = st.columns([1, 1])
     with col_c:
         if st.button("受付内容を保存"):
@@ -473,6 +502,15 @@ with tabs[3]:
                 use_ai=True,
                 model=llm_model,
             )
+            spec_inputs = spec.get("inputs") or {}
+            spec_inputs["mail_rule"] = {
+                "subject_filter": mail_subject_filter,
+                "task_name": mail_task_name,
+                "require_attachment": mail_require_attachment,
+                "action_id": mail_action_id,
+                "parameters": mail_params,
+            }
+            spec["inputs"] = spec_inputs
             st.session_state["intent_spec"] = spec
             st.session_state["intent_spec_source"] = source
             st.session_state["intent_spec_error"] = error
@@ -490,6 +528,15 @@ with tabs[3]:
             artifacts=artifacts,
             use_ai=False,
         )
+        spec_inputs = spec.get("inputs") or {}
+        spec_inputs["mail_rule"] = {
+            "subject_filter": mail_subject_filter,
+            "task_name": mail_task_name,
+            "require_attachment": mail_require_attachment,
+            "action_id": mail_action_id,
+            "parameters": mail_params,
+        }
+        spec["inputs"] = spec_inputs
         st.session_state["intent_spec"] = spec
         st.session_state["intent_spec_source"] = source
         st.session_state["intent_spec_error"] = error
@@ -509,6 +556,19 @@ with tabs[3]:
 
     if st.session_state.get("quality_intake"):
         st.json(st.session_state["quality_intake"])
+
+    if st.button("Append Mail Rule To Rules", type="primary"):
+        current_spec = st.session_state.get("intent_spec")
+        if not current_spec:
+            st.warning("Intent Spec not generated yet.")
+        else:
+            rule, rule_error = build_mail_rule_from_intent_spec(current_spec)
+            if rule_error:
+                st.warning(rule_error)
+            else:
+                st.session_state["rules"].append(rule)
+                st.success("Rule appended to Rules (draft).")
+                st.rerun()
 
 with tabs[4]:
     jobs = st.session_state.setdefault("jobs", {})

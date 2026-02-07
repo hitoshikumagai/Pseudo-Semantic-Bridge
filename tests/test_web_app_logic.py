@@ -363,6 +363,46 @@ def test_parse_rules_input_skips_non_dict_entries():
     assert "skipped" in error
 
 
+def test_build_mail_rule_from_intent_spec_uses_mail_rule_payload():
+    spec = {
+        "spec_id": "spec-1",
+        "domain": "mail",
+        "intent": "ocr mail",
+        "inputs": {
+            "mail_rule": {
+                "subject_filter": "請求書",
+                "task_name": "INVOICE",
+                "require_attachment": True,
+                "action_id": "ocr_process",
+                "parameters": {"lang": "jpn"},
+            }
+        },
+        "steps": [{"id": "s1", "action": "fetch_mails", "params": {}}],
+        "verification": {"required_fields": [], "min_quality_score": 0.8},
+        "fallback": {"on_failure": "route_manual_review"},
+    }
+    rule, error = app_logic.build_mail_rule_from_intent_spec(spec)
+    assert error is None
+    assert rule["subject_filter"] == "請求書"
+    assert rule["action_id"] == "ocr_process"
+    assert rule["parameters"]["lang"] == "jpn"
+
+
+def test_build_mail_rule_from_intent_spec_validates_required_fields():
+    spec = {
+        "spec_id": "spec-2",
+        "domain": "mail",
+        "intent": "ocr mail",
+        "inputs": {"mail_rule": {"task_name": "INVOICE"}},
+        "steps": [{"id": "s1", "action": "fetch_mails", "params": {}}],
+        "verification": {"required_fields": [], "min_quality_score": 0.8},
+        "fallback": {"on_failure": "route_manual_review"},
+    }
+    rule, error = app_logic.build_mail_rule_from_intent_spec(spec)
+    assert rule is None
+    assert "subject_filter" in error
+
+
 def test_run_rule_check_detects_missing_keys_and_feedback_hints():
     feedback = {"raw": "slow and fail"}
     rules = [{"subject_filter": "invoice"}, {"action_id": "save_only"}]

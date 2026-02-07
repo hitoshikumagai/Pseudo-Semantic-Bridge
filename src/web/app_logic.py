@@ -388,6 +388,48 @@ def parse_rules_input(text: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     return rules, None
 
 
+def build_mail_rule_from_intent_spec(spec: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    if not isinstance(spec, dict):
+        return None, "Intent spec is not a dict."
+    inputs = spec.get("inputs") or {}
+    if not isinstance(inputs, dict):
+        return None, "Intent spec inputs must be a dict."
+    mail_rule = inputs.get("mail_rule") or {}
+    if not mail_rule:
+        mail_rule = {
+            "subject_filter": inputs.get("subject_filter"),
+            "task_name": inputs.get("task_name"),
+            "require_attachment": inputs.get("require_attachment"),
+            "action_id": inputs.get("action_id"),
+            "parameters": inputs.get("parameters"),
+        }
+    if not isinstance(mail_rule, dict):
+        return None, "Intent spec mail_rule must be a dict."
+    subject_filter = mail_rule.get("subject_filter")
+    action_id = mail_rule.get("action_id")
+    if not subject_filter or not action_id:
+        return None, "mail_rule requires subject_filter and action_id."
+    task_name = mail_rule.get("task_name") or "AUTO"
+    require_attachment = mail_rule.get("require_attachment")
+    if require_attachment is None:
+        require_attachment = True
+    parameters = mail_rule.get("parameters") or {}
+    if isinstance(parameters, str):
+        try:
+            parameters = json.loads(parameters)
+        except json.JSONDecodeError:
+            return None, "mail_rule parameters must be valid JSON."
+    if not isinstance(parameters, dict):
+        return None, "mail_rule parameters must be a dict."
+    return {
+        "subject_filter": str(subject_filter),
+        "task_name": str(task_name),
+        "require_attachment": bool(require_attachment),
+        "action_id": str(action_id),
+        "parameters": parameters,
+    }, None
+
+
 def run_rule_check(feedback: Dict[str, Any], rules: List[Dict[str, Any]]) -> Dict[str, Any]:
     required_keys = {"subject_filter", "action_id"}
     missing = []

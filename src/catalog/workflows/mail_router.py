@@ -76,6 +76,9 @@ def mail_workflow(*args, **kwargs):
 
     task_name = matched_rule["task_name"]
     action_id = matched_rule["action_id"]
+    rule_params = matched_rule.get("parameters") or {}
+    if not isinstance(rule_params, dict):
+        rule_params = {}
     
     require_attachment = matched_rule.get("require_attachment")
     if isinstance(require_attachment, str):
@@ -91,6 +94,12 @@ def mail_workflow(*args, **kwargs):
 
     if require_attachment and not has_attachment:
         return
+
+    effective_params = dict(params) if isinstance(params, dict) else {}
+    for key, value in rule_params.items():
+        if key == "rule_file":
+            continue
+        effective_params[key] = value
 
     def log_run(attachment_ext: str, action_executed: str = None):
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -132,7 +141,7 @@ def mail_workflow(*args, **kwargs):
         target_func = PROCESSOR_MAP.get(action_id, save_only)
         for child in children:
             try:
-                target_func(child, final_output_dir, params)
+                target_func(child, final_output_dir, effective_params)
                 log_run(get_child_ext(child), action_executed=action_id)
             except Exception as e:
                 error_record = {

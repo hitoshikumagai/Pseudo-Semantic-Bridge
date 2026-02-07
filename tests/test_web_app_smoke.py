@@ -59,6 +59,9 @@ class _FakeStreamlit(types.ModuleType):
     def checkbox(self, label, **kwargs):
         return kwargs.get("value", False)
 
+    def selectbox(self, label, options, **kwargs):
+        return options[0]
+
     def radio(self, label, options, **kwargs):
         return options[0]
 
@@ -142,6 +145,9 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
             "ended_at": "2026-02-06T00:00:01+00:00",
             "artifacts": [],
         }
+    )
+    fake_app_logic.build_mail_rule_from_intent_spec = (
+        lambda _spec: ({"subject_filter": "Invoice", "task_name": "INVOICE", "require_attachment": True, "action_id": "ocr_process", "parameters": {}}, None)
     )
     fake_app_logic.compute_job_duration_seconds = lambda _job: 0.1
     fake_app_logic.summarize_run_window = (

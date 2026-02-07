@@ -195,6 +195,36 @@ def test_mail_workflow_unknown_action_falls_back_to_save_only_and_logs(tmp_path,
     assert records[0]["result"]["action_executed"] == "unknown_action"
 
 
+def test_mail_workflow_merges_rule_parameters(tmp_path, monkeypatch):
+    rules_path = tmp_path / "rules.json"
+    _write_rules(
+        rules_path,
+        [
+            {
+                "subject_filter": "Invoice",
+                "task_name": "INVOICE",
+                "action_id": "save_process",
+                "require_attachment": True,
+                "parameters": {"lang": "jpn"},
+            }
+        ],
+    )
+
+    calls = []
+
+    def fake_handler(item, output_dir, params):
+        calls.append(params)
+
+    monkeypatch.setitem(mail_workflow.__globals__["PROCESSOR_MAP"], "save_process", fake_handler)
+
+    item = DummyItem("Invoice 123", children=[DummyChild("a.pdf")])
+    mail_workflow(item, str(tmp_path), {"rule_file": str(rules_path)})
+
+    assert calls
+    assert calls[0]["lang"] == "jpn"
+    assert calls[0]["rule_file"] == str(rules_path)
+
+
 def test_mail_workflow_attachment_error_appends_error_record(tmp_path, monkeypatch):
     rules_path = tmp_path / "rules.json"
     _write_rules(

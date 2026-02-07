@@ -62,6 +62,13 @@ def run_pipeline_baseline(
 def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter_factory, engine_factory):
     jobs.setdefault(job_id, {"status": "queued"})
     jobs[job_id]["status"] = "running"
+    pythoncom = None
+    try:
+        import pythoncom as _pythoncom  # type: ignore
+        pythoncom = _pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pythoncom = None
     pipeline_summary = run_pipeline_baseline(
         build_fn=build_fn,
         config_path=config_path,
@@ -75,6 +82,11 @@ def run_engine_job(jobs: dict, job_id: str, build_fn, config_path: Path, adapter
         jobs[job_id]["status"] = "done"
     else:
         jobs[job_id]["status"] = f"error: {pipeline_summary.get('error')}"
+    if pythoncom is not None:
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
 
 
 def summarize_run_window(

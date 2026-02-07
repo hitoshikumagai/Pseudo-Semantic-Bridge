@@ -1,4 +1,6 @@
 import json
+import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -149,6 +151,52 @@ st.markdown(
 )
 
 
+@st.cache_data(show_spinner=False)
+def load_runs_cached(path_str: str, mtime: float):
+    return load_jsonl_runs(Path(path_str))
+
+
+@st.cache_data(show_spinner=False)
+def load_runs_tail_cached(path_str: str, mtime: float, max_lines: int):
+    return load_jsonl_runs_tail(Path(path_str), max_lines=max_lines)
+
+
+def _log_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+
+
+def _split_chunks(text: str) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    cleaned = cleaned.replace("・", " ")
+    parts = re.split(r"[、。/|\n]+", cleaned)
+    chunks = [part.strip() for part in parts if part.strip()]
+    return chunks if chunks else [cleaned]
+
+
+def _dedupe_chunks(chunks: list[str]) -> list[str]:
+    seen = set()
+    unique = []
+    for chunk in chunks:
+        if chunk in seen:
+            continue
+        seen.add(chunk)
+        unique.append(chunk)
+    return unique
+
+
+def _record_perf(label: str, seconds: float, count: int) -> None:
+    marks = st.session_state.get("perf_marks") or []
+    marks.append((label, seconds, count))
+    if len(marks) > 200:
+        marks = marks[-200:]
+    st.session_state["perf_marks"] = marks
+
+
 def render_kpi(label: str, value: str):
     st.markdown(
         f"""
@@ -187,6 +235,11 @@ st.markdown(
 st.write("")
 
 tabs = st.tabs(["Overview", "Rules", "Design: Rule Builder", "Design: Intent Spec", "Run"])
+
+if "perf_debug" not in st.session_state:
+    st.session_state["perf_debug"] = False
+if "perf_marks" not in st.session_state:
+    st.session_state["perf_marks"] = []
 
 if "rules" not in st.session_state:
     existing_rules = load_rules(RULES_PATH)
@@ -231,9 +284,14 @@ if "conversation_summary" not in st.session_state:
     st.session_state["conversation_summary"] = []
 if "conversation_focus" not in st.session_state:
     st.session_state["conversation_focus"] = None
+if "conversation_marked" not in st.session_state:
+    st.session_state["conversation_marked"] = []
 
 with tabs[0]:
-    runs = load_jsonl_runs(LOGS_PATH)
+    log_mtime = _log_mtime(LOGS_PATH)
+    start = time.perf_counter()
+    runs = load_runs_cached(str(LOGS_PATH), log_mtime)
+    _record_perf("overview.load_runs_full", time.perf_counter() - start, len(runs))
     summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
     success_rate = round((summary["success"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
     quality_rate = round((summary["quality_ok"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
@@ -344,7 +402,10 @@ with tabs[2]:
         st.json(st.session_state["instruction_intake"])
 
     if st.button("Generate Candidates", type="primary"):
-        runs = load_jsonl_runs(LOGS_PATH)
+        log_mtime = _log_mtime(LOGS_PATH)
+        start = time.perf_counter()
+        runs = load_runs_cached(str(LOGS_PATH), log_mtime)
+        _record_perf("rule_builder.load_runs_full", time.perf_counter() - start, len(runs))
         if not runs:
             st.session_state["ai_meta"] = []
             st.session_state["ai_candidates"] = []
@@ -374,7 +435,10 @@ with tabs[2]:
             st.session_state["ai_candidates"] = candidate_rows
             st.session_state["ai_instruction"] = user_instruction
 
-    runs = load_jsonl_runs(LOGS_PATH)
+    log_mtime = _log_mtime(LOGS_PATH)
+    start = time.perf_counter()
+    runs = load_runs_cached(str(LOGS_PATH), log_mtime)
+    _record_perf("rule_builder.summary_runs_full", time.perf_counter() - start, len(runs))
     summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
     st.caption(
         f"Logs: {summary['total']} | Success: {summary['success']} | "
@@ -484,6 +548,7 @@ with tabs[3]:
             st.session_state["conversation_allow_more"] = False
             st.session_state["conversation_summary"] = []
             st.session_state["conversation_focus"] = None
+            st.session_state["conversation_marked"] = []
             st.rerun()
 
     if st.button("Summarize Conversation"):
@@ -496,12 +561,28 @@ with tabs[3]:
             st.warning(error)
         st.session_state["conversation_summary"] = summary
         st.session_state["conversation_focus"] = None
+        st.session_state["conversation_marked"] = []
 
     summary_bullets = st.session_state.get("conversation_summary") or []
     if summary_bullets:
         st.markdown("<div class='psb-label'>Summary (Bullet)</div>", unsafe_allow_html=True)
         for bullet in summary_bullets:
             st.write(f"- {bullet}")
+        chunks = []
+        for bullet in summary_bullets:
+            chunks.extend(_split_chunks(bullet))
+        chunks = _dedupe_chunks(chunks)
+        marked = st.multiselect(
+            "興味のある文字の塊をマーキング",
+            chunks,
+            default=st.session_state.get("conversation_marked") or [],
+        )
+        st.session_state["conversation_marked"] = marked
+        if st.button("Use Marked Chunks as Focus"):
+            if not marked:
+                st.warning("Marked chunks are empty.")
+            else:
+                st.session_state["conversation_focus"] = " / ".join(marked)
         focus_choice = st.selectbox("興味のあるポイントを選択", summary_bullets)
         if st.button("Confirm Focus"):
             st.session_state["conversation_focus"] = focus_choice
@@ -738,7 +819,10 @@ with tabs[4]:
             if OutlookAdapter is None:
                 st.error(f"Outlook adapter is unavailable: {OUTLOOK_IMPORT_ERROR}")
                 st.stop()
-            baseline_count = len(load_jsonl_runs(LOGS_PATH))
+            log_mtime = _log_mtime(LOGS_PATH)
+            start = time.perf_counter()
+            baseline_count = len(load_runs_cached(str(LOGS_PATH), log_mtime))
+            _record_perf("run.baseline_count", time.perf_counter() - start, baseline_count)
             current_spec = st.session_state.get("intent_spec") or {}
 
             def _run(current_job_id: str):
@@ -793,7 +877,10 @@ with tabs[4]:
     with detail_col:
         show_global_detail = st.checkbox("Show global detail table", value=False)
 
-    all_runs = load_jsonl_runs_tail(LOGS_PATH, max_lines=int(tail_limit))
+    log_mtime = _log_mtime(LOGS_PATH)
+    start = time.perf_counter()
+    all_runs = load_runs_tail_cached(str(LOGS_PATH), log_mtime, max_lines=int(tail_limit))
+    _record_perf("run.load_runs_tail", time.perf_counter() - start, len(all_runs))
     global_summary = summarize_run_window(all_runs, start_index=0)
     st.markdown("<div class='psb-label'>Global Run Summary (Jupyter + Web)</div>", unsafe_allow_html=True)
     g1, g2, g3, g4 = st.columns(4)
@@ -826,7 +913,10 @@ with tabs[4]:
 
     last_job_id = st.session_state.get("last_job_id")
     if last_job_id and last_job_id in jobs:
-        current_runs = load_jsonl_runs(LOGS_PATH)
+        log_mtime = _log_mtime(LOGS_PATH)
+        start = time.perf_counter()
+        current_runs = load_runs_cached(str(LOGS_PATH), log_mtime)
+        _record_perf("run.load_runs_full", time.perf_counter() - start, len(current_runs))
         last_job = jobs[last_job_id]
         duration_sec = compute_job_duration_seconds(last_job)
         st.markdown("<div class='psb-label'>Last Triggered Job Summary (Web only)</div>", unsafe_allow_html=True)
@@ -892,3 +982,16 @@ with tabs[4]:
         for job_id, info in list(jobs.items())[::-1]:
             spec_label = info.get("spec_id", "-")
             st.write(f"{job_id} | spec: {spec_label} | status: {info['status']}")
+
+    with st.expander("Performance (Debug)", expanded=False):
+        st.session_state["perf_debug"] = st.checkbox("Show timings", value=st.session_state.get("perf_debug", False))
+        if st.session_state.get("perf_debug"):
+            marks = st.session_state.get("perf_marks") or []
+            if marks:
+                rows = [
+                    {"label": label, "seconds": round(seconds, 4), "items": count}
+                    for label, seconds, count in marks[-20:]
+                ]
+                st.dataframe(rows, use_container_width=True)
+            else:
+                st.info("No timings captured yet.")

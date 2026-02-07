@@ -98,6 +98,11 @@ class _FakeStreamlit(types.ModuleType):
     def rerun(self):
         self.calls.append(("rerun",))
 
+    def cache_data(self, *args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+
 
 def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_st = _FakeStreamlit(pressed_buttons=pressed_buttons)

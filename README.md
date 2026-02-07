@@ -2,7 +2,7 @@
 
 **A Metadata-Driven Architecture for Decoupling Business Intent from System Implementation.**
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![Architecture](https://img.shields.io/badge/Architecture-Semantic_Bridge-purple)
 ![Status](https://img.shields.io/badge/Status-Phase1_Pseudo--Bridge-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -52,16 +52,18 @@ graph TD
 
 ```text
 project_root/
-├── main.py                  # [Entrypoint] Runs Builder -> Engine automatically
 ├── specs/                   # [Input] User Intent (Excel)
 │   └── accounting/
 │       ├── invoice_bot_v2.xlsx      # System Pipeline (Extension -> Processor)
 │       └── mail_business_rules.xlsx # Business Logic (Subject -> Task)
 ├── configs/                 # [Artifacts] Compiled JSON (Machine Readable)
 ├── data/                    # [Output] Processed results
+├── web_app.py               # [Entrypoint] Streamlit UI for design/run
 └── src/
     ├── bridge/              # Excel Parser & Builder
     ├── engine/              # Generic Dispatcher
+    ├── telemetry/           # JSONL run logging
+    ├── web/                 # Web app logic & services
     └── catalog/
         ├── agents/          # API-driven extensions (custom scripts)
         ├── workflows/       # Complex Logic (e.g., Mail Routing)
@@ -159,7 +161,7 @@ Notes:
 
 ---
 
-## 🐍 Conda Setup
+## 🐍 Conda Setup (Recommended)
 
 This project assumes **Anaconda / Miniconda**.
 
@@ -178,31 +180,23 @@ pytest -q
 
 ## 🚀 Usage Workflow
 
-### 1. Install Dependencies
+### 1. Create Environment (Conda)
 
 ```bash
-pip install pandas openpyxl pydantic pywin32
-
+conda env create -f environment.yml
+conda activate pseudo-semantic-bridge
 ```
 
-### 2. Run the Bot
-
-You only need to run one command. The script handles both **compilation** (Excel -> JSON) and **execution**.
+### 2. Run the Web App (Recommended)
 
 ```bash
-python main.py
-
+streamlit run web_app.py
 ```
 
 **What happens inside:**
 
-1. **Bridge Phase:** Checks `specs/`. If Excel files are found, it compiles them into optimized JSON files in `configs/`.
-2. **Engine Phase:** Loads the JSON config and connects to Outlook.
-3. **Processing:**
-* It fetches emails.
-* Passes `.msg` files to `mail_workflow`.
-* `mail_workflow` reads the business rules JSON.
-* It executes OCR on PDFs and saves Excel files as defined in your rules.
+1. **Design Phase:** Edit rules/intent specs and compile Excel -> JSON.
+2. **Run Phase:** Execute pipelines and view run history/logs.
 
 
 
@@ -247,6 +241,18 @@ streamlit run web_app.py
 Features:
 - Edit business rules (`configs/accounting/mail_business_rules.json`)
 - Run the pipeline as a background job
+- Chat-based intent drafting and spec generation
+- Run log timeline and run detail view
+- AI rule candidate extraction (from run history)
+
+---
+
+## 🧾 Run Logs (JSONL)
+
+Pipeline runs are appended as JSONL records:
+
+- Default path: `data/logs/psb_run.jsonl`
+- Useful for audit trails, rule mining, and UI summaries
 
 ---
 
@@ -257,3 +263,19 @@ Open **`quickstart/quick_start.ipynb`** to visualize the flow step-by-step.
 1. Create mock Excel specs.
 2. Compile them to JSON (observe the `configs/` folder creation).
 3. Run the Engine and verify the output in `data/`.
+
+---
+
+## ✅ Tests & Coverage
+
+Run the unit tests:
+
+```bash
+pytest -q
+```
+
+Optional coverage run:
+
+```bash
+bash scripts/coverage.sh
+```

@@ -65,6 +65,12 @@ class _FakeStreamlit(types.ModuleType):
     def expander(self, label, **kwargs):
         return _DummyContext()
 
+    def chat_message(self, role, **kwargs):
+        return _DummyContext()
+
+    def chat_input(self, label, **kwargs):
+        return ""
+
     def radio(self, label, options, **kwargs):
         return options[0]
 

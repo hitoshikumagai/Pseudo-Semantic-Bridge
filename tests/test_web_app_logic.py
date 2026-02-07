@@ -430,6 +430,7 @@ def test_generate_followup_question_template_mode():
         conversation=[{"role": "user", "content": "請求書をOCRしたい"}],
         use_ai=False,
         round_index=1,
+        memory_bullets=["目的: 請求書OCR"],
     )
     assert source == "template"
     assert error is None

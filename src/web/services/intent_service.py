@@ -184,6 +184,7 @@ def generate_followup_question(
     use_ai: bool = False,
     model: str = "gpt-4o-mini",
     round_index: int = 0,
+    memory_bullets: Optional[List[str]] = None,
 ) -> Tuple[str, Optional[str], str]:
     template_questions = [
         "対象メールの件名やキーワードは何ですか？",
@@ -201,6 +202,9 @@ def generate_followup_question(
         )
 
     convo_text = _conversation_to_text(conversation)
+    memory_text = ""
+    if memory_bullets:
+        memory_text = "memory_bullets: " + " / ".join([str(item) for item in memory_bullets if str(item)])
     try:
         from openai import OpenAI
 
@@ -220,7 +224,7 @@ def generate_followup_question(
                 },
                 {
                     "role": "user",
-                    "content": f"domain_hint: {domain_hint}\nconversation:\n{convo_text}\n",
+                    "content": f"domain_hint: {domain_hint}\n{memory_text}\nconversation:\n{convo_text}\n",
                 },
             ],
         )

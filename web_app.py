@@ -446,41 +446,38 @@ with tabs[3]:
         for entry in st.session_state["conversation_log"]:
             role = entry.get("role", "user")
             content = entry.get("content", "")
-            st.markdown(f"**{role}**: {content}")
+            with st.chat_message(role):
+                st.markdown(content)
     else:
         st.caption("Conversation log is empty.")
 
-    convo_input = st.text_area("User message", placeholder="やりたいことを短く入力してください", height=80)
-    convo_col_a, convo_col_b, convo_col_c = st.columns([1, 1, 1])
-    with convo_col_a:
-        if st.button("Add Message"):
-            if convo_input.strip():
-                st.session_state["conversation_log"].append({"role": "user", "content": convo_input.strip()})
-                st.rerun()
-            else:
-                st.warning("User message is empty.")
-    with convo_col_b:
+    user_message = st.chat_input("やりたいことを入力してください")
+    if user_message:
+        st.session_state["conversation_log"].append({"role": "user", "content": user_message})
         allow_more_needed = st.session_state["conversation_rounds"] >= 3 and not st.session_state["conversation_allow_more"]
         if allow_more_needed:
-            st.info("質問は3回まで。さらに必要なら許可してください。")
-            if st.button("Allow More Questions"):
-                st.session_state["conversation_allow_more"] = True
-                st.rerun()
+            st.warning("質問は3回まで。さらに必要なら許可してください。")
         else:
-            if st.button("Ask Next Question (AI)"):
-                question, error, source = generate_followup_question(
-                    conversation=st.session_state["conversation_log"],
-                    domain_hint="accounting_mail_invoice",
-                    use_ai=True,
-                    model=llm_model,
-                    round_index=st.session_state["conversation_rounds"],
-                )
-                if error:
-                    st.warning(error)
-                st.session_state["conversation_log"].append({"role": "assistant", "content": question})
-                st.session_state["conversation_rounds"] += 1
-                st.rerun()
-    with convo_col_c:
+            question, error, source = generate_followup_question(
+                conversation=st.session_state["conversation_log"],
+                domain_hint="accounting_mail_invoice",
+                use_ai=True,
+                model=llm_model,
+                round_index=st.session_state["conversation_rounds"],
+                memory_bullets=st.session_state.get("conversation_summary") or [],
+            )
+            if error:
+                st.warning(error)
+            st.session_state["conversation_log"].append({"role": "assistant", "content": question})
+            st.session_state["conversation_rounds"] += 1
+        st.rerun()
+
+    convo_col_a, convo_col_b = st.columns([1, 1])
+    with convo_col_a:
+        if st.button("Allow More Questions"):
+            st.session_state["conversation_allow_more"] = True
+            st.rerun()
+    with convo_col_b:
         if st.button("Reset Conversation"):
             st.session_state["conversation_log"] = []
             st.session_state["conversation_rounds"] = 0

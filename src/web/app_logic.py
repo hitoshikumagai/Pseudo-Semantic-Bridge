@@ -228,6 +228,28 @@ def load_jsonl_runs(path: Path) -> List[Dict[str, Any]]:
     return runs
 
 
+def load_jsonl_runs_tail(path: Path, max_lines: int = 200) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+    if max_lines and max_lines > 0:
+        lines = lines[-max_lines:]
+    runs: List[Dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            runs.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return runs
+
+
 def summarize_quality(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
     total = len(runs)
     success = 0

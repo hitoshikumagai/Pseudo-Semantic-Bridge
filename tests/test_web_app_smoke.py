@@ -56,6 +56,9 @@ class _FakeStreamlit(types.ModuleType):
     def text_input(self, label, **kwargs):
         return kwargs.get("value", "")
 
+    def checkbox(self, label, **kwargs):
+        return kwargs.get("value", False)
+
     def radio(self, label, options, **kwargs):
         return options[0]
 
@@ -112,6 +115,7 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic = types.ModuleType("src.web.app_logic")
     fake_app_logic.load_rules = lambda _path: []
     fake_app_logic.load_jsonl_runs = lambda _path: []
+    fake_app_logic.load_jsonl_runs_tail = lambda _path, max_lines=200: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     fake_app_logic.save_rules = lambda *_args, **_kwargs: None
     fake_app_logic.analyze_and_log_user_instruction = (

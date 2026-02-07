@@ -225,6 +225,24 @@ def test_load_jsonl_runs_skips_invalid_lines(tmp_path):
     assert [run["run_id"] for run in runs] == ["1", "2"]
 
 
+def test_load_jsonl_runs_tail_limits_lines(tmp_path):
+    log_path = tmp_path / "runs.jsonl"
+    log_path.write_text(
+        "\n".join(
+            [
+                '{"run_id":"1","result":{"status":"success"}}',
+                '{"run_id":"2","result":{"status":"success"}}',
+                '{"run_id":"3","result":{"status":"success"}}',
+                '{"run_id":"4","result":{"status":"success"}}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    runs = app_logic.load_jsonl_runs_tail(log_path, max_lines=2)
+    assert [run["run_id"] for run in runs] == ["3", "4"]
+
+
 def test_summarize_quality_counts_success_and_quality_labels():
     runs = [
         {"result": {"status": "success"}, "quality": {"label": "OK"}},

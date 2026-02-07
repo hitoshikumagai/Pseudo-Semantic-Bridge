@@ -11,6 +11,7 @@ from src.web.app_logic import (
     compute_job_duration_seconds,
     generate_intent_spec,
     load_jsonl_runs,
+    load_jsonl_runs_tail,
     load_rules,
     propose_rule_candidates,
     run_bridge_compile_summary,
@@ -587,7 +588,13 @@ with tabs[4]:
             st.warning(f"Compile error: {compile_summary.get('error')}")
 
     # Always show global log view so notebook-triggered runs are visible in Web.
-    all_runs = load_jsonl_runs(LOGS_PATH)
+    summary_col, detail_col = st.columns([1, 1])
+    with summary_col:
+        tail_limit = st.number_input("Global log lines (tail)", min_value=50, max_value=2000, value=300, step=50)
+    with detail_col:
+        show_global_detail = st.checkbox("Show global detail table", value=False)
+
+    all_runs = load_jsonl_runs_tail(LOGS_PATH, max_lines=int(tail_limit))
     global_summary = summarize_run_window(all_runs, start_index=0)
     st.markdown("<div class='psb-label'>Global Run Summary (Jupyter + Web)</div>", unsafe_allow_html=True)
     g1, g2, g3, g4 = st.columns(4)
@@ -606,16 +613,17 @@ with tabs[4]:
     if global_summary["latest_error"]:
         st.warning(f"Latest error: {global_summary['latest_error']}")
 
-    st.markdown("<div class='psb-label'>Global Run Detail</div>", unsafe_allow_html=True)
-    global_detail_rows = summarize_run_detail_rows(
-        all_runs,
-        start_index=0,
-        limit=100,
-    )
-    if global_detail_rows:
-        st.dataframe(global_detail_rows, use_container_width=True)
-    else:
-        st.info("No logs found yet.")
+    if show_global_detail:
+        st.markdown("<div class='psb-label'>Global Run Detail</div>", unsafe_allow_html=True)
+        global_detail_rows = summarize_run_detail_rows(
+            all_runs,
+            start_index=0,
+            limit=100,
+        )
+        if global_detail_rows:
+            st.dataframe(global_detail_rows, use_container_width=True)
+        else:
+            st.info("No logs found yet.")
 
     last_job_id = st.session_state.get("last_job_id")
     if last_job_id and last_job_id in jobs:

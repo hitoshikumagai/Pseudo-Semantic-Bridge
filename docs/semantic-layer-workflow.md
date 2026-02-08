@@ -30,3 +30,12 @@ Important sections:
 - On app load, semantic assets are projected into working tab state when available.
 - During interaction, working state is continuously re-aggregated back into `semantic_layer_spec` in session.
 - `Run` calls runtime preparation, writes effective rules to `RULES_PATH`, and then executes the pipeline.
+
+## Run Prerequisites
+`Run Automation` is gated until the following semantic prerequisites are satisfied:
+- `purpose.objective_statement` is non-empty.
+- `purpose.priority_domain` is non-empty.
+- `automation_assets.rules` has at least one rule.
+- `automation_assets.intent_spec.spec_id` exists.
+
+If any prerequisite is missing, the UI shows blocking messages and does not start compile/run.

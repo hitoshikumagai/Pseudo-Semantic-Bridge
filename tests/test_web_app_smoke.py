@@ -12,9 +12,9 @@ class _DummyContext:
 
 
 class _FakeStreamlit(types.ModuleType):
-    def __init__(self, pressed_buttons=None):
+    def __init__(self, pressed_buttons=None, initial_session_state=None):
         super().__init__("streamlit")
-        self.session_state = {}
+        self.session_state = dict(initial_session_state or {})
         self.calls = []
         self.pressed_buttons = set(pressed_buttons or [])
 
@@ -84,13 +84,16 @@ class _FakeStreamlit(types.ModuleType):
         self.calls.append(("dataframe",))
 
     def success(self, *args, **kwargs):
-        self.calls.append(("success",))
+        self.calls.append(("success", args[0] if args else None))
 
     def info(self, *args, **kwargs):
-        self.calls.append(("info",))
+        self.calls.append(("info", args[0] if args else None))
 
     def warning(self, *args, **kwargs):
-        self.calls.append(("warning",))
+        self.calls.append(("warning", args[0] if args else None))
+
+    def error(self, *args, **kwargs):
+        self.calls.append(("error", args[0] if args else None))
 
     def json(self, *args, **kwargs):
         self.calls.append(("json",))
@@ -98,14 +101,17 @@ class _FakeStreamlit(types.ModuleType):
     def rerun(self):
         self.calls.append(("rerun",))
 
+    def stop(self):
+        raise RuntimeError("st.stop called")
+
     def cache_data(self, *args, **kwargs):
         def decorator(func):
             return func
         return decorator
 
 
-def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
-    fake_st = _FakeStreamlit(pressed_buttons=pressed_buttons)
+def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None, initial_session_state=None):
+    fake_st = _FakeStreamlit(pressed_buttons=pressed_buttons, initial_session_state=initial_session_state)
     monkeypatch.setitem(sys.modules, "streamlit", fake_st)
 
     fake_builder = types.ModuleType("src.bridge.builder")
@@ -128,7 +134,7 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_adapter.OutlookAdapter = OutlookAdapter
     monkeypatch.setitem(sys.modules, "src.adapter.outlook", fake_adapter)
 
-    tracker = {"run_engine_job": 0, "start_job": 0, "save_rules": 0}
+    tracker = {"run_engine_job": 0, "start_job": 0, "save_rules": 0, "saved_rules_payloads": []}
     fake_app_logic = types.ModuleType("src.web.app_logic")
     fake_app_logic.load_rules = lambda _path: []
     fake_app_logic.load_jsonl_runs = lambda _path: []
@@ -136,6 +142,8 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
     def save_rules(*_args, **_kwargs):
         tracker["save_rules"] += 1
+        if len(_args) >= 2:
+            tracker["saved_rules_payloads"].append(_args[1])
 
     fake_app_logic.save_rules = save_rules
     fake_app_logic.append_unique_rules = (
@@ -278,12 +286,69 @@ def test_web_app_import_smoke(monkeypatch):
 
 
 def test_web_app_run_pipeline_smoke(monkeypatch):
+    semantic_spec = {
+        "purpose": {"objective_statement": "Improve retention", "priority_domain": "customer"},
+        "automation_assets": {
+            "rules": [
+                {
+                    "subject_filter": "Invoice",
+                    "task_name": "INVOICE",
+                    "require_attachment": True,
+                    "action_id": "ocr_process",
+                    "parameters": {},
+                }
+            ],
+            "intent_spec": {"spec_id": "spec-from-semantic", "inputs": {}, "steps": []},
+            "intent_spec_source": "semantic",
+        },
+    }
     _module, fake_st, tracker = _import_web_app_with_fakes(
         monkeypatch,
         pressed_buttons={"Run Pipeline"},
+        initial_session_state={"semantic_layer_spec": semantic_spec},
     )
     assert tracker["save_rules"] >= 1
     assert tracker["start_job"] == 1
     assert tracker["run_engine_job"] == 1
     assert fake_st.session_state["last_job_id"] == "job-smoke"
     assert fake_st.session_state["jobs"]["job-smoke"]["status"] == "done"
+
+
+def test_web_app_run_pipeline_blocked_when_prerequisites_missing(monkeypatch):
+    _module, fake_st, tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"Run Pipeline"},
+    )
+    assert tracker["start_job"] == 0
+    assert tracker["run_engine_job"] == 0
+    warnings = [call[1] for call in fake_st.calls if call[0] == "warning"]
+    assert any("Cannot run until prerequisites are satisfied." in str(message) for message in warnings)
+
+
+def test_web_app_projects_semantic_assets_to_runtime(monkeypatch):
+    semantic_rules = [
+        {
+            "subject_filter": "VIP",
+            "task_name": "VIP_MAIL",
+            "require_attachment": False,
+            "action_id": "save_process",
+            "parameters": {"destination": "/tmp"},
+        }
+    ]
+    semantic_spec = {
+        "purpose": {"objective_statement": "Reduce SLA misses", "priority_domain": "operations"},
+        "automation_assets": {
+            "rules": semantic_rules,
+            "intent_spec": {"spec_id": "spec-semantic-runtime", "inputs": {}, "steps": []},
+            "intent_spec_source": "semantic",
+        },
+    }
+    _module, fake_st, tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"Run Pipeline"},
+        initial_session_state={"semantic_layer_spec": semantic_spec},
+    )
+    assert fake_st.session_state["rules"] == semantic_rules
+    assert tracker["saved_rules_payloads"]
+    assert tracker["saved_rules_payloads"][-1] == semantic_rules
+    assert tracker["start_job"] == 1

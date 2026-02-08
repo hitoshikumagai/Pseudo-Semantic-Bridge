@@ -451,6 +451,67 @@ def _prepare_runtime_from_semantic() -> dict:
     return st.session_state.get("intent_spec") if isinstance(st.session_state.get("intent_spec"), dict) else {}
 
 
+def _runtime_readiness_issues(spec: dict) -> list[str]:
+    issues = []
+    purpose = spec.get("purpose") if isinstance(spec.get("purpose"), dict) else {}
+    assets = _get_semantic_assets(spec)
+    rules = _normalize_dict_rows(assets.get("rules"))
+    intent_spec = assets.get("intent_spec")
+
+    if not str(purpose.get("objective_statement") or "").strip():
+        issues.append("Missing purpose.objective_statement in semantic layer.")
+    if not str(purpose.get("priority_domain") or "").strip():
+        issues.append("Missing purpose.priority_domain in semantic layer.")
+    if not rules:
+        issues.append("No semantic rules found in automation_assets.rules.")
+    if not isinstance(intent_spec, dict) or not str(intent_spec.get("spec_id") or "").strip():
+        issues.append("Missing semantic intent spec in automation_assets.intent_spec.")
+    return issues
+
+
+def _semantic_source_rows(spec: dict) -> list[dict]:
+    purpose = spec.get("purpose") if isinstance(spec.get("purpose"), dict) else {}
+    assets = _get_semantic_assets(spec)
+    rules = _normalize_dict_rows(assets.get("rules"))
+    proposed_rules = _normalize_dict_rows(assets.get("proposed_rules"))
+    candidate_rows = _normalize_dict_rows(assets.get("candidate_rows"))
+    intent_spec = assets.get("intent_spec")
+    return [
+        {
+            "path": "purpose.objective_statement",
+            "status": "ready" if str(purpose.get("objective_statement") or "").strip() else "missing",
+            "value": str(purpose.get("objective_statement") or ""),
+        },
+        {
+            "path": "purpose.priority_domain",
+            "status": "ready" if str(purpose.get("priority_domain") or "").strip() else "missing",
+            "value": str(purpose.get("priority_domain") or ""),
+        },
+        {
+            "path": "automation_assets.rules",
+            "status": "ready" if rules else "missing",
+            "value": len(rules),
+        },
+        {
+            "path": "automation_assets.proposed_rules",
+            "status": "ready" if proposed_rules else "missing",
+            "value": len(proposed_rules),
+        },
+        {
+            "path": "automation_assets.candidate_rows",
+            "status": "ready" if candidate_rows else "missing",
+            "value": len(candidate_rows),
+        },
+        {
+            "path": "automation_assets.intent_spec",
+            "status": "ready"
+            if isinstance(intent_spec, dict) and str(intent_spec.get("spec_id") or "").strip()
+            else "missing",
+            "value": intent_spec.get("spec_id") if isinstance(intent_spec, dict) else "",
+        },
+    ]
+
+
 def render_kpi(label: str, value: str):
     st.markdown(
         f"""
@@ -562,12 +623,13 @@ st.session_state["semantic_layer_spec"] = _collect_semantic_payload_from_state(
 
 with tabs[0]:
     st.caption("Workflow: Semantic Inputs -> Semantic Layer Hub -> Run Automation")
+    semantic_payload = st.session_state.get("semantic_layer_spec") or {}
     log_mtime = _log_mtime(LOGS_PATH)
     start = time.perf_counter()
     runs = load_runs_cached(str(LOGS_PATH), log_mtime)
     _record_perf("overview.load_runs_full", time.perf_counter() - start, len(runs))
     summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
-    semantic_summary = _summarize_semantic_layer(st.session_state.get("semantic_layer_spec") or {})
+    semantic_summary = _summarize_semantic_layer(semantic_payload)
     success_rate = round((summary["success"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
     quality_rate = round((summary["quality_ok"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
 
@@ -602,6 +664,11 @@ with tabs[0]:
         f"metadata sources {semantic_summary['metadata_sources']} | "
         f"domain owners {semantic_summary['domain_owners']}"
     )
+
+    st.write("")
+    st.markdown("<div class='psb-label'>Semantic Source Of Truth</div>", unsafe_allow_html=True)
+    source_rows = _semantic_source_rows(semantic_payload)
+    st.dataframe(source_rows, use_container_width=True)
 
 with tabs[1]:
     st.markdown("<div class='psb-label'>Semantic Input / Rule Assets</div>", unsafe_allow_html=True)
@@ -1404,6 +1471,15 @@ with tabs[5]:
     jobs = st.session_state.setdefault("jobs", {})
     st.markdown("<div class='psb-label'>Run Automation</div>", unsafe_allow_html=True)
     st.caption("Run uses the semantic-layer aggregated assets as the final automation input.")
+    runtime_semantic_payload = _collect_semantic_payload_from_state(st.session_state.get("semantic_layer_spec") or {})
+    run_issues = _runtime_readiness_issues(runtime_semantic_payload)
+    st.markdown("<div class='psb-label'>Run Prerequisites</div>", unsafe_allow_html=True)
+    if run_issues:
+        st.warning("Run prerequisites are not complete yet.")
+        for issue in run_issues:
+            st.write(f"- {issue}")
+    else:
+        st.success("Run prerequisites are satisfied.")
     st.markdown(
         "<div class='psb-card'>"
         "<div class='psb-label'>Config</div>"
@@ -1418,47 +1494,53 @@ with tabs[5]:
     run_col_a, run_col_b = st.columns([1, 1])
     with run_col_a:
         if st.button("Compile Specs Only"):
-            _prepare_runtime_from_semantic()
-            compile_summary = run_bridge_compile_summary(
-                build_all_configs,
-                SYSTEM_CONFIG_PATH,
-                RULES_PATH,
-            )
-            st.session_state["compile_summary"] = compile_summary
-            if compile_summary["status"] == "done":
-                st.success("Bridge compile completed.")
+            if run_issues:
+                st.warning("Cannot compile until run prerequisites are satisfied.")
             else:
-                st.error(f"Bridge compile failed: {compile_summary.get('error')}")
-    with run_col_b:
-        if st.button("Run Pipeline"):
-            if OutlookAdapter is None:
-                st.error(f"Outlook adapter is unavailable: {OUTLOOK_IMPORT_ERROR}")
-                st.stop()
-            current_spec = _prepare_runtime_from_semantic()
-            log_mtime = _log_mtime(LOGS_PATH)
-            start = time.perf_counter()
-            baseline_count = len(load_runs_cached(str(LOGS_PATH), log_mtime))
-            _record_perf("run.baseline_count", time.perf_counter() - start, baseline_count)
-
-            def _run(current_job_id: str):
-                run_engine_job(
-                    jobs,
-                    current_job_id,
+                _prepare_runtime_from_semantic()
+                compile_summary = run_bridge_compile_summary(
                     build_all_configs,
                     SYSTEM_CONFIG_PATH,
-                    OutlookAdapter,
-                    GenericEtlEngine,
+                    RULES_PATH,
                 )
+                st.session_state["compile_summary"] = compile_summary
+                if compile_summary["status"] == "done":
+                    st.success("Bridge compile completed.")
+                else:
+                    st.error(f"Bridge compile failed: {compile_summary.get('error')}")
+    with run_col_b:
+        if st.button("Run Pipeline"):
+            if run_issues:
+                st.warning("Cannot run until prerequisites are satisfied.")
+            elif OutlookAdapter is None:
+                st.error(f"Outlook adapter is unavailable: {OUTLOOK_IMPORT_ERROR}")
+                st.stop()
+            else:
+                current_spec = _prepare_runtime_from_semantic()
+                log_mtime = _log_mtime(LOGS_PATH)
+                start = time.perf_counter()
+                baseline_count = len(load_runs_cached(str(LOGS_PATH), log_mtime))
+                _record_perf("run.baseline_count", time.perf_counter() - start, baseline_count)
 
-            job_id = start_job(
-                jobs,
-                _run,
-            )
-            if current_spec.get("spec_id"):
-                jobs[job_id]["spec_id"] = current_spec["spec_id"]
-                jobs[job_id]["spec_source"] = st.session_state.get("intent_spec_source")
-            jobs[job_id]["log_start_index"] = baseline_count
-            st.session_state["last_job_id"] = job_id
+                def _run(current_job_id: str):
+                    run_engine_job(
+                        jobs,
+                        current_job_id,
+                        build_all_configs,
+                        SYSTEM_CONFIG_PATH,
+                        OutlookAdapter,
+                        GenericEtlEngine,
+                    )
+
+                job_id = start_job(
+                    jobs,
+                    _run,
+                )
+                if current_spec.get("spec_id"):
+                    jobs[job_id]["spec_id"] = current_spec["spec_id"]
+                    jobs[job_id]["spec_source"] = st.session_state.get("intent_spec_source")
+                jobs[job_id]["log_start_index"] = baseline_count
+                st.session_state["last_job_id"] = job_id
 
     if st.button("Refresh Results"):
         st.rerun()

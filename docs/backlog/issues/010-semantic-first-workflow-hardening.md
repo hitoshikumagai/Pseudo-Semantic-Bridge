@@ -1,5 +1,8 @@
 # Harden semantic-first workflow
 
+## Status
+Done (2026-02-08)
+
 ## Goal
 Complete the shift to a semantic-first app flow where all design tabs are inputs and `Run` is execution-only.
 
@@ -18,3 +21,9 @@ Complete the shift to a semantic-first app flow where all design tabs are inputs
 - Add a compact "semantic source of truth" status panel to Overview.
 - Add tests for projection path: semantic -> tab state -> runtime preparation.
 - Document the new run prerequisites in workflow docs.
+
+## Resolution Notes
+- Implemented run gating with explicit prerequisite messages in `Run Automation`.
+- Added a compact "Semantic Source Of Truth" panel in `Semantic Overview`.
+- Added smoke coverage for blocked run and semantic projection path.
+- Updated semantic workflow docs with run prerequisite rules.

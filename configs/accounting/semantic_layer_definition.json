@@ -1,0 +1,99 @@
+{
+  "spec_id": "semantic-layer-blueprint",
+  "spec_version": "1.0",
+  "updated_at": null,
+  "purpose": {
+    "objective_statement": "",
+    "success_metric": "",
+    "priority_domain": "",
+    "initial_scope": "",
+    "priority_objectives": [
+      {
+        "objective": "",
+        "target_metric": "",
+        "owner": "",
+        "priority": "high"
+      }
+    ]
+  },
+  "technical_metadata": {
+    "auto_collection_enabled": true,
+    "metadata_sources": [
+      {
+        "system_type": "warehouse",
+        "system_name": "",
+        "connector": "",
+        "status": "planned"
+      }
+    ],
+    "lineage_paths": [
+      {
+        "source_asset": "",
+        "transform": "",
+        "target_asset": "",
+        "trust_level": "medium"
+      }
+    ]
+  },
+  "business_semantics": {
+    "glossary_terms": [
+      {
+        "term_id": "",
+        "business_name": "",
+        "technical_field": "",
+        "definition": "",
+        "calc_logic": ""
+      }
+    ],
+    "kpi_definitions": [
+      {
+        "kpi_name": "",
+        "formula": "",
+        "grain": "",
+        "source_of_truth": ""
+      }
+    ]
+  },
+  "federation": {
+    "integrated_tools": [
+      {
+        "category": "catalog",
+        "tool_name": "",
+        "integration_mode": "federated",
+        "status": "planned"
+      }
+    ],
+    "tacit_patterns": [
+      {
+        "pattern": "",
+        "meaning": "",
+        "domain": ""
+      }
+    ]
+  },
+  "active_metadata": {
+    "ai_enrichment_enabled": true,
+    "human_review_required": true,
+    "learning_cycle": "weekly",
+    "learning_signals": [
+      {
+        "signal_name": "",
+        "source": "",
+        "action": ""
+      }
+    ]
+  },
+  "ownership": {
+    "ownership_model": "federated",
+    "central_team": "",
+    "domain_owners": [
+      {
+        "domain": "",
+        "owner_team": "",
+        "steward": "",
+        "approval_sla_days": 5
+      }
+    ],
+    "guardrails": ""
+  }
+}

@@ -38,6 +38,7 @@ PROPOSED_RULES_PATH = Path("configs/accounting/mail_rules_proposed.json")
 SYSTEM_CONFIG_PATH = Path("configs/accounting/invoice_bot_v2.json")
 LOGS_PATH = Path("data/logs/psb_run.jsonl")
 INTAKE_LOGS_PATH = Path("data/logs/intent_intake.jsonl")
+SEMANTIC_LAYER_PATH = Path("configs/accounting/semantic_layer_definition.json")
 OUTLOOK_IMPORT_ERROR = None
 OutlookAdapter = None
 
@@ -211,6 +212,168 @@ def _record_perf(label: str, seconds: float, count: int) -> None:
     st.session_state["perf_marks"] = marks
 
 
+def _default_semantic_layer_spec() -> dict:
+    return {
+        "spec_id": "semantic-layer-blueprint",
+        "spec_version": "1.0",
+        "updated_at": None,
+        "purpose": {
+            "objective_statement": "",
+            "success_metric": "",
+            "priority_domain": "",
+            "initial_scope": "",
+            "priority_objectives": [
+                {"objective": "", "target_metric": "", "owner": "", "priority": "high"}
+            ],
+        },
+        "technical_metadata": {
+            "auto_collection_enabled": True,
+            "metadata_sources": [
+                {"system_type": "warehouse", "system_name": "", "connector": "", "status": "planned"}
+            ],
+            "lineage_paths": [
+                {"source_asset": "", "transform": "", "target_asset": "", "trust_level": "medium"}
+            ],
+        },
+        "business_semantics": {
+            "glossary_terms": [
+                {"term_id": "", "business_name": "", "technical_field": "", "definition": "", "calc_logic": ""}
+            ],
+            "kpi_definitions": [
+                {"kpi_name": "", "formula": "", "grain": "", "source_of_truth": ""}
+            ],
+        },
+        "federation": {
+            "integrated_tools": [
+                {"category": "catalog", "tool_name": "", "integration_mode": "federated", "status": "planned"}
+            ],
+            "tacit_patterns": [{"pattern": "", "meaning": "", "domain": ""}],
+        },
+        "active_metadata": {
+            "ai_enrichment_enabled": True,
+            "human_review_required": True,
+            "learning_cycle": "weekly",
+            "learning_signals": [{"signal_name": "", "source": "", "action": ""}],
+        },
+        "ownership": {
+            "ownership_model": "federated",
+            "central_team": "",
+            "domain_owners": [{"domain": "", "owner_team": "", "steward": "", "approval_sla_days": 5}],
+            "guardrails": "",
+        },
+    }
+
+
+def _merge_semantic_spec(default_spec: dict, current_spec: dict) -> dict:
+    merged = dict(default_spec)
+    for key, default_value in default_spec.items():
+        current_value = current_spec.get(key)
+        if isinstance(default_value, dict):
+            section = dict(default_value)
+            if isinstance(current_value, dict):
+                for field, field_default in default_value.items():
+                    field_value = current_value.get(field)
+                    if isinstance(field_default, list):
+                        section[field] = field_value if isinstance(field_value, list) else list(field_default)
+                    elif isinstance(field_default, dict):
+                        section[field] = field_value if isinstance(field_value, dict) else dict(field_default)
+                    else:
+                        section[field] = field_default if field_value is None else field_value
+            merged[key] = section
+            continue
+        if current_value is None:
+            merged[key] = default_value
+            continue
+        merged[key] = current_value
+    return merged
+
+
+def _load_semantic_layer_spec(path: Path) -> dict:
+    default_spec = _default_semantic_layer_spec()
+    if not path.exists():
+        return default_spec
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default_spec
+    if not isinstance(loaded, dict):
+        return default_spec
+    return _merge_semantic_spec(default_spec, loaded)
+
+
+def _save_semantic_layer_spec(path: Path, spec: dict) -> None:
+    payload = _merge_semantic_spec(_default_semantic_layer_spec(), spec if isinstance(spec, dict) else {})
+    payload["updated_at"] = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _count_rows(value) -> int:
+    if not isinstance(value, list):
+        return 0
+    return len([row for row in value if isinstance(row, dict)])
+
+
+def _summarize_semantic_layer(spec: dict) -> dict:
+    purpose = spec.get("purpose") if isinstance(spec.get("purpose"), dict) else {}
+    technical_metadata = spec.get("technical_metadata") if isinstance(spec.get("technical_metadata"), dict) else {}
+    business_semantics = spec.get("business_semantics") if isinstance(spec.get("business_semantics"), dict) else {}
+    federation = spec.get("federation") if isinstance(spec.get("federation"), dict) else {}
+    active_metadata = spec.get("active_metadata") if isinstance(spec.get("active_metadata"), dict) else {}
+    ownership = spec.get("ownership") if isinstance(spec.get("ownership"), dict) else {}
+
+    objective_ready = bool((purpose.get("objective_statement") or "").strip()) and bool(
+        (purpose.get("priority_domain") or "").strip()
+    )
+    technical_ready = _count_rows(technical_metadata.get("metadata_sources")) > 0
+    semantics_ready = _count_rows(business_semantics.get("glossary_terms")) > 0
+    federation_ready = _count_rows(federation.get("integrated_tools")) > 0
+    active_ready = _count_rows(active_metadata.get("learning_signals")) > 0
+    ownership_ready = _count_rows(ownership.get("domain_owners")) > 0
+
+    ready_steps = sum(
+        [
+            int(objective_ready),
+            int(technical_ready),
+            int(semantics_ready),
+            int(federation_ready),
+            int(active_ready),
+            int(ownership_ready),
+        ]
+    )
+    return {
+        "ready_steps": ready_steps,
+        "total_steps": 6,
+        "readiness_pct": round((ready_steps / 6) * 100, 1),
+        "glossary_terms": _count_rows(business_semantics.get("glossary_terms")),
+        "metadata_sources": _count_rows(technical_metadata.get("metadata_sources")),
+        "domain_owners": _count_rows(ownership.get("domain_owners")),
+    }
+
+
+def _build_semantic_context(spec: dict) -> dict:
+    purpose = spec.get("purpose") if isinstance(spec.get("purpose"), dict) else {}
+    business_semantics = spec.get("business_semantics") if isinstance(spec.get("business_semantics"), dict) else {}
+    technical_metadata = spec.get("technical_metadata") if isinstance(spec.get("technical_metadata"), dict) else {}
+    objective_rows = purpose.get("priority_objectives") if isinstance(purpose.get("priority_objectives"), list) else []
+    objective_labels = []
+    for row in objective_rows:
+        if not isinstance(row, dict):
+            continue
+        objective = str(row.get("objective") or "").strip()
+        if objective:
+            objective_labels.append(objective)
+    return {
+        "spec_id": spec.get("spec_id"),
+        "spec_version": spec.get("spec_version"),
+        "priority_domain": purpose.get("priority_domain"),
+        "objective_statement": purpose.get("objective_statement"),
+        "priority_objectives": objective_labels,
+        "glossary_terms_count": _count_rows(business_semantics.get("glossary_terms")),
+        "metadata_sources_count": _count_rows(technical_metadata.get("metadata_sources")),
+    }
+
+
 def render_kpi(label: str, value: str):
     st.markdown(
         f"""
@@ -248,7 +411,16 @@ st.markdown(
 
 st.write("")
 
-tabs = st.tabs(["Overview", "Rules", "Design: Rule Builder", "Design: Intent Spec", "Run"])
+tabs = st.tabs(
+    [
+        "Overview",
+        "Rules",
+        "Design: Rule Builder",
+        "Design: Intent Spec",
+        "Design: Semantic Layer",
+        "Run",
+    ]
+)
 
 if "perf_debug" not in st.session_state:
     st.session_state["perf_debug"] = False
@@ -291,6 +463,8 @@ if "instruction_intake" not in st.session_state:
 
 if "compile_summary" not in st.session_state:
     st.session_state["compile_summary"] = None
+if "semantic_layer_spec" not in st.session_state:
+    st.session_state["semantic_layer_spec"] = _load_semantic_layer_spec(SEMANTIC_LAYER_PATH)
 if "conversation_log" not in st.session_state:
     st.session_state["conversation_log"] = []
 if "conversation_rounds" not in st.session_state:
@@ -310,11 +484,12 @@ with tabs[0]:
     runs = load_runs_cached(str(LOGS_PATH), log_mtime)
     _record_perf("overview.load_runs_full", time.perf_counter() - start, len(runs))
     summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
+    semantic_summary = _summarize_semantic_layer(st.session_state.get("semantic_layer_spec") or {})
     success_rate = round((summary["success"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
     quality_rate = round((summary["quality_ok"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
 
     st.markdown("<div class='psb-label'>Control Tower</div>", unsafe_allow_html=True)
-    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a, col_b, col_c, col_d, col_e, col_f = st.columns(6)
     with col_a:
         render_kpi("Rules", str(len(st.session_state["rules"])))
     with col_b:
@@ -323,16 +498,27 @@ with tabs[0]:
         render_kpi("Success Rate", f"{success_rate}%")
     with col_d:
         render_kpi("Quality OK", f"{quality_rate}%")
+    with col_e:
+        render_kpi("Semantic Readiness", f"{semantic_summary['readiness_pct']}%")
+    with col_f:
+        render_kpi("Glossary Terms", str(semantic_summary["glossary_terms"]))
 
     st.write("")
     st.markdown("<div class='psb-label'>Planned Modules (Skeleton)</div>", unsafe_allow_html=True)
-    col_e, col_f, col_g = st.columns(3)
-    with col_e:
-        render_skeleton_card("Intake Flow", [92, 75, 60, 84])
-    with col_f:
-        render_skeleton_card("Rule Suggestion", [88, 82, 68, 54])
+    col_g, col_h, col_i = st.columns(3)
     with col_g:
+        render_skeleton_card("Intake Flow", [92, 75, 60, 84])
+    with col_h:
+        render_skeleton_card("Rule Suggestion", [88, 82, 68, 54])
+    with col_i:
         render_skeleton_card("Run Timeline", [90, 65, 72, 58])
+
+    st.caption(
+        "Semantic progress: "
+        f"{semantic_summary['ready_steps']}/{semantic_summary['total_steps']} steps complete | "
+        f"metadata sources {semantic_summary['metadata_sources']} | "
+        f"domain owners {semantic_summary['domain_owners']}"
+    )
 
 with tabs[1]:
     st.markdown("<div class='psb-label'>Business Rules</div>", unsafe_allow_html=True)
@@ -688,6 +874,7 @@ with tabs[3]:
                 "action_id": mail_action_id,
                 "parameters": mail_params,
             }
+            spec_inputs["semantic_layer"] = _build_semantic_context(st.session_state.get("semantic_layer_spec") or {})
             spec["inputs"] = spec_inputs
             st.session_state["intent_spec"] = spec
             st.session_state["intent_spec_source"] = source
@@ -771,6 +958,7 @@ with tabs[3]:
                     "action_id": mail_action_id,
                     "parameters": mail_params,
                 }
+                spec_inputs["semantic_layer"] = _build_semantic_context(st.session_state.get("semantic_layer_spec") or {})
                 spec["inputs"] = spec_inputs
                 st.session_state["intent_spec"] = spec
                 st.session_state["intent_spec_source"] = source
@@ -797,6 +985,7 @@ with tabs[3]:
                 "action_id": mail_action_id,
                 "parameters": mail_params,
             }
+            spec_inputs["semantic_layer"] = _build_semantic_context(st.session_state.get("semantic_layer_spec") or {})
             spec["inputs"] = spec_inputs
             st.session_state["intent_spec"] = spec
             st.session_state["intent_spec_source"] = source
@@ -892,6 +1081,248 @@ with tabs[3]:
         st.json(st.session_state["quality_intake"])
 
 with tabs[4]:
+    st.markdown("<div class='psb-label'>Design / Semantic Layer</div>", unsafe_allow_html=True)
+    st.write(
+        "Build the semantic layer in six steps so business meaning, lineage, ownership, "
+        "and active metadata are captured in one portable spec."
+    )
+    st.caption(f"Output path: {SEMANTIC_LAYER_PATH}")
+
+    semantic_spec = _merge_semantic_spec(
+        _default_semantic_layer_spec(),
+        st.session_state.get("semantic_layer_spec") or {},
+    )
+
+    purpose = semantic_spec.get("purpose") if isinstance(semantic_spec.get("purpose"), dict) else {}
+    technical_metadata = (
+        semantic_spec.get("technical_metadata") if isinstance(semantic_spec.get("technical_metadata"), dict) else {}
+    )
+    business_semantics = (
+        semantic_spec.get("business_semantics") if isinstance(semantic_spec.get("business_semantics"), dict) else {}
+    )
+    federation = semantic_spec.get("federation") if isinstance(semantic_spec.get("federation"), dict) else {}
+    active_metadata = (
+        semantic_spec.get("active_metadata") if isinstance(semantic_spec.get("active_metadata"), dict) else {}
+    )
+    ownership = semantic_spec.get("ownership") if isinstance(semantic_spec.get("ownership"), dict) else {}
+
+    st.markdown("<div class='psb-label'>Step 1: Business Objective and Scope</div>", unsafe_allow_html=True)
+    objective_statement = st.text_area(
+        "Objective statement",
+        value=str(purpose.get("objective_statement") or ""),
+        placeholder="e.g. Improve customer retention while reducing compliance risk.",
+        height=80,
+    )
+    metric_col_a, metric_col_b = st.columns([1, 1])
+    with metric_col_a:
+        success_metric = st.text_input("Primary success metric", value=str(purpose.get("success_metric") or ""))
+    with metric_col_b:
+        priority_domain = st.text_input("Priority domain", value=str(purpose.get("priority_domain") or ""))
+    initial_scope = st.text_area(
+        "Initial high-value scope",
+        value=str(purpose.get("initial_scope") or ""),
+        placeholder="e.g. Start with finance and customer billing events only.",
+        height=70,
+    )
+    priority_objectives = purpose.get("priority_objectives") if isinstance(purpose.get("priority_objectives"), list) else []
+    priority_objectives = st.data_editor(
+        priority_objectives,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_priority_objectives_editor",
+    )
+
+    st.markdown("<div class='psb-label'>Step 2: Automated Technical Metadata</div>", unsafe_allow_html=True)
+    auto_collection_enabled = st.checkbox(
+        "Enable automated metadata collection",
+        value=bool(technical_metadata.get("auto_collection_enabled", True)),
+    )
+    metadata_sources = technical_metadata.get("metadata_sources") if isinstance(technical_metadata.get("metadata_sources"), list) else []
+    metadata_sources = st.data_editor(
+        metadata_sources,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_metadata_sources_editor",
+    )
+    lineage_paths = technical_metadata.get("lineage_paths") if isinstance(technical_metadata.get("lineage_paths"), list) else []
+    lineage_paths = st.data_editor(
+        lineage_paths,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_lineage_paths_editor",
+    )
+
+    st.markdown("<div class='psb-label'>Step 3: Business Terms and KPI Logic</div>", unsafe_allow_html=True)
+    glossary_terms = business_semantics.get("glossary_terms") if isinstance(business_semantics.get("glossary_terms"), list) else []
+    glossary_terms = st.data_editor(
+        glossary_terms,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_glossary_editor",
+    )
+    kpi_definitions = business_semantics.get("kpi_definitions") if isinstance(business_semantics.get("kpi_definitions"), list) else []
+    kpi_definitions = st.data_editor(
+        kpi_definitions,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_kpi_editor",
+    )
+
+    st.markdown("<div class='psb-label'>Step 4: Federation of Existing Investments</div>", unsafe_allow_html=True)
+    integrated_tools = federation.get("integrated_tools") if isinstance(federation.get("integrated_tools"), list) else []
+    integrated_tools = st.data_editor(
+        integrated_tools,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_integrated_tools_editor",
+    )
+    tacit_patterns = federation.get("tacit_patterns") if isinstance(federation.get("tacit_patterns"), list) else []
+    tacit_patterns = st.data_editor(
+        tacit_patterns,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_tacit_patterns_editor",
+    )
+
+    st.markdown("<div class='psb-label'>Step 5: Active Metadata and Learning Loop</div>", unsafe_allow_html=True)
+    active_col_a, active_col_b, active_col_c = st.columns([1, 1, 1])
+    with active_col_a:
+        ai_enrichment_enabled = st.checkbox(
+            "Enable AI enrichment",
+            value=bool(active_metadata.get("ai_enrichment_enabled", True)),
+        )
+    with active_col_b:
+        human_review_required = st.checkbox(
+            "Require human review",
+            value=bool(active_metadata.get("human_review_required", True)),
+        )
+    with active_col_c:
+        learning_cycle_options = ["daily", "weekly", "biweekly", "monthly"]
+        learning_cycle_current = str(active_metadata.get("learning_cycle") or "weekly")
+        learning_cycle = st.selectbox(
+            "Learning cycle",
+            learning_cycle_options,
+            index=learning_cycle_options.index(learning_cycle_current)
+            if learning_cycle_current in learning_cycle_options
+            else 1,
+        )
+    learning_signals = active_metadata.get("learning_signals") if isinstance(active_metadata.get("learning_signals"), list) else []
+    learning_signals = st.data_editor(
+        learning_signals,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_learning_signals_editor",
+    )
+
+    st.markdown("<div class='psb-label'>Step 6: Decentralized Ownership</div>", unsafe_allow_html=True)
+    ownership_col_a, ownership_col_b = st.columns([1, 1])
+    ownership_model_options = ["federated", "hybrid", "centralized"]
+    ownership_model_current = str(ownership.get("ownership_model") or "federated")
+    with ownership_col_a:
+        ownership_model = st.selectbox(
+            "Ownership model",
+            ownership_model_options,
+            index=ownership_model_options.index(ownership_model_current)
+            if ownership_model_current in ownership_model_options
+            else 0,
+        )
+    with ownership_col_b:
+        central_team = st.text_input("Central team", value=str(ownership.get("central_team") or ""))
+    domain_owners = ownership.get("domain_owners") if isinstance(ownership.get("domain_owners"), list) else []
+    domain_owners = st.data_editor(
+        domain_owners,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="semantic_domain_owners_editor",
+    )
+    guardrails = st.text_area(
+        "Governance guardrails",
+        value=str(ownership.get("guardrails") or ""),
+        placeholder="e.g. Naming standards, SLA for approvals, and compliance checks.",
+        height=70,
+    )
+
+    semantic_payload = {
+        "spec_id": str(semantic_spec.get("spec_id") or "semantic-layer-blueprint"),
+        "spec_version": str(semantic_spec.get("spec_version") or "1.0"),
+        "updated_at": semantic_spec.get("updated_at"),
+        "purpose": {
+            "objective_statement": objective_statement,
+            "success_metric": success_metric,
+            "priority_domain": priority_domain,
+            "initial_scope": initial_scope,
+            "priority_objectives": [row for row in priority_objectives if isinstance(row, dict)],
+        },
+        "technical_metadata": {
+            "auto_collection_enabled": bool(auto_collection_enabled),
+            "metadata_sources": [row for row in metadata_sources if isinstance(row, dict)],
+            "lineage_paths": [row for row in lineage_paths if isinstance(row, dict)],
+        },
+        "business_semantics": {
+            "glossary_terms": [row for row in glossary_terms if isinstance(row, dict)],
+            "kpi_definitions": [row for row in kpi_definitions if isinstance(row, dict)],
+        },
+        "federation": {
+            "integrated_tools": [row for row in integrated_tools if isinstance(row, dict)],
+            "tacit_patterns": [row for row in tacit_patterns if isinstance(row, dict)],
+        },
+        "active_metadata": {
+            "ai_enrichment_enabled": bool(ai_enrichment_enabled),
+            "human_review_required": bool(human_review_required),
+            "learning_cycle": learning_cycle,
+            "learning_signals": [row for row in learning_signals if isinstance(row, dict)],
+        },
+        "ownership": {
+            "ownership_model": ownership_model,
+            "central_team": central_team,
+            "domain_owners": [row for row in domain_owners if isinstance(row, dict)],
+            "guardrails": guardrails,
+        },
+    }
+    st.session_state["semantic_layer_spec"] = semantic_payload
+    semantic_summary = _summarize_semantic_layer(semantic_payload)
+
+    status_col_a, status_col_b, status_col_c = st.columns(3)
+    with status_col_a:
+        st.metric("Semantic readiness", f"{semantic_summary['readiness_pct']}%")
+    with status_col_b:
+        st.metric("Glossary terms", semantic_summary["glossary_terms"])
+    with status_col_c:
+        st.metric("Domain owners", semantic_summary["domain_owners"])
+
+    st.caption(
+        f"Step completion: {semantic_summary['ready_steps']}/{semantic_summary['total_steps']} | "
+        f"metadata sources: {semantic_summary['metadata_sources']}"
+    )
+    if semantic_summary["ready_steps"] < semantic_summary["total_steps"]:
+        st.warning("Some semantic-layer steps are still incomplete.")
+
+    save_col_a, save_col_b, save_col_c = st.columns([1, 1, 1])
+    with save_col_a:
+        if st.button("Save Semantic Layer Definition", type="primary"):
+            _save_semantic_layer_spec(SEMANTIC_LAYER_PATH, semantic_payload)
+            st.session_state["semantic_layer_spec"] = _load_semantic_layer_spec(SEMANTIC_LAYER_PATH)
+            st.success(f"Semantic layer definition saved: {SEMANTIC_LAYER_PATH}")
+    with save_col_b:
+        if st.button("Reload Semantic Layer Definition"):
+            st.session_state["semantic_layer_spec"] = _load_semantic_layer_spec(SEMANTIC_LAYER_PATH)
+            st.rerun()
+    with save_col_c:
+        if st.button("Attach To Current Intent Spec"):
+            current_spec = st.session_state.get("intent_spec")
+            if not current_spec:
+                st.warning("Intent Spec not generated yet.")
+            else:
+                spec_inputs = current_spec.get("inputs") or {}
+                spec_inputs["semantic_layer"] = _build_semantic_context(semantic_payload)
+                current_spec["inputs"] = spec_inputs
+                st.session_state["intent_spec"] = current_spec
+                st.success("Semantic context attached to current Intent Spec.")
+
+    st.markdown("<div class='psb-label'>Semantic Layer Spec Preview</div>", unsafe_allow_html=True)
+    st.json(semantic_payload)
+
+with tabs[5]:
     jobs = st.session_state.setdefault("jobs", {})
     st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
     st.markdown(

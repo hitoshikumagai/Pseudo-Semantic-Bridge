@@ -7,9 +7,15 @@ Each design tab contributes inputs into one aggregated semantic payload, and the
 ## UI Flow
 1. `Rules` updates rule assets in `automation_assets.rules` and `automation_assets.proposed_rules`.
 2. `Design: Rule Builder` updates `automation_assets.candidate_meta` and `automation_assets.candidate_rows`.
-3. `Design: Intent Spec` updates `automation_assets.intent_spec` and `automation_assets.intent_spec_source`.
-4. `Design: Semantic Layer` edits business/metadata/governance sections and previews the full aggregated payload.
-5. `Run` prepares runtime inputs from the semantic payload and then executes compile/run.
+3. `Design: Rule Builder` also supports AI draft generation from human instruction and queues drafts into `automation_assets.proposed_rules`.
+4. `Design: Intent Spec` updates `automation_assets.intent_spec` and `automation_assets.intent_spec_source`.
+5. `Design: Semantic Layer` edits business/metadata/governance sections and previews the full aggregated payload.
+6. `Run` prepares runtime inputs from the semantic payload and then executes compile/run.
+
+## Review-First Rule Flow
+- Human writes an instruction in candidate tab.
+- AI generates draft rules and sends them to proposed rules queue.
+- Human reviews proposed rules (`select + merge`) before active rules are updated.
 
 ## Data Model
 Semantic layer file:

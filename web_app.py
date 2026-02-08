@@ -512,6 +512,59 @@ def _semantic_source_rows(spec: dict) -> list[dict]:
     ]
 
 
+def _render_input_hub_mapping(title: str, rows: list[dict]) -> None:
+    st.markdown(f"<div class='psb-label'>{title}</div>", unsafe_allow_html=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def _extract_instruction_text(record: dict) -> str:
+    if not isinstance(record, dict):
+        return ""
+    parts = []
+    raw = record.get("instruction_raw")
+    summary = record.get("intent_summary")
+    tasks = record.get("tasks")
+    constraints = record.get("constraints")
+    if isinstance(raw, str):
+        parts.append(raw)
+    if isinstance(summary, str):
+        parts.append(summary)
+    if isinstance(tasks, list):
+        for item in tasks:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("task") or item.get("name") or item.get("action") or ""))
+    if isinstance(constraints, list):
+        for item in constraints:
+            if isinstance(item, str):
+                parts.append(item)
+    return " ".join([part.strip() for part in parts if isinstance(part, str) and part.strip()]).lower()
+
+
+def _fallback_rule_drafts_from_text(text: str) -> list[dict]:
+    lowered = (text or "").lower()
+    if not lowered:
+        return []
+    action_id = "save_process"
+    if "ocr" in lowered:
+        action_id = "ocr_process"
+    elif "zip" in lowered or "unzip" in lowered:
+        action_id = "unzip_process"
+    subject_filter = "Invoice" if "invoice" in lowered else "Auto Draft"
+    return [
+        {
+            "subject_filter": subject_filter,
+            "task_name": "AUTO_DRAFT",
+            "require_attachment": True,
+            "target_ext": ".pdf",
+            "action_id": action_id,
+            "parameters": {"draft_source": "ai_instruction_fallback"},
+            "rule_source": {"kind": "ai_draft", "confidence": 0.5},
+        }
+    ]
+
+
 def render_kpi(label: str, value: str):
     st.markdown(
         f"""
@@ -673,6 +726,26 @@ with tabs[0]:
 with tabs[1]:
     st.markdown("<div class='psb-label'>Semantic Input / Rule Assets</div>", unsafe_allow_html=True)
     st.caption("Writes into semantic path: automation_assets.rules / automation_assets.proposed_rules")
+    _render_input_hub_mapping(
+        "Input -> Hub Linkage (Rules)",
+        [
+            {
+                "input": "Rules editor",
+                "hub_path": "automation_assets.rules",
+                "current": len(st.session_state.get("rules") or []),
+            },
+            {
+                "input": "Proposed rules editor",
+                "hub_path": "automation_assets.proposed_rules",
+                "current": len(st.session_state.get("proposed_rules") or []),
+            },
+            {
+                "input": "Merge Selected",
+                "hub_path": "automation_assets.rules",
+                "current": "review -> approve -> merge",
+            },
+        ],
+    )
     edited = st.data_editor(
         st.session_state["rules"],
         num_rows="dynamic",
@@ -692,7 +765,8 @@ with tabs[1]:
             st.rerun()
 
     st.write("")
-    st.markdown("<div class='psb-label'>Proposed Rules</div>", unsafe_allow_html=True)
+    st.markdown("<div class='psb-label'>Proposed Rules (Review Queue)</div>", unsafe_allow_html=True)
+    st.caption("AI and mining drafts land here first. Human review is required before merge.")
     st.caption(f"Proposed rules path: {PROPOSED_RULES_PATH}")
     proposed_with_select = []
     for row in st.session_state.get("proposed_rules") or []:
@@ -759,7 +833,27 @@ with tabs[1]:
 with tabs[2]:
     st.markdown("<div class='psb-label'>Semantic Input / Candidate Mining</div>", unsafe_allow_html=True)
     st.caption("Writes into semantic path: automation_assets.candidate_meta / automation_assets.candidate_rows")
-    st.write("実行ログからルール候補を生成し、Rulesへ反映するための設計タブです。")
+    _render_input_hub_mapping(
+        "Input -> Hub Linkage (Candidates)",
+        [
+            {
+                "input": "Instruction analysis",
+                "hub_path": "automation_assets.instruction_intake",
+                "current": "ready" if st.session_state.get("instruction_intake") else "missing",
+            },
+            {
+                "input": "Generate Candidates",
+                "hub_path": "automation_assets.candidate_meta / candidate_rows",
+                "current": len(st.session_state.get("ai_candidates") or []),
+            },
+            {
+                "input": "AI Draft Rules",
+                "hub_path": "automation_assets.proposed_rules",
+                "current": len(st.session_state.get("proposed_rules") or []),
+            },
+        ],
+    )
+    st.write("Generate rule candidates from run logs and route them into review-first rule drafts.")
     st.caption("Output: executable rule rows (subject_filter, action_id, etc.)")
 
     col_a, col_b, col_c = st.columns([1, 1, 1])
@@ -820,6 +914,81 @@ with tabs[2]:
     if st.session_state["instruction_intake"]:
         st.markdown("<div class='psb-label'>Instruction Analysis</div>", unsafe_allow_html=True)
         st.json(st.session_state["instruction_intake"])
+
+    st.write("")
+    st.markdown("<div class='psb-label'>AI Draft Rules From Human Input</div>", unsafe_allow_html=True)
+    st.caption("Human writes intent -> AI generates draft rules -> human reviews in Proposed Rules queue.")
+    draft_prompt = st.text_area(
+        "Draft instruction",
+        value=user_instruction,
+        placeholder="e.g. For invoice emails, prioritize OCR and keep zipped receipts extractable.",
+        height=80,
+        key="rule_draft_prompt_input",
+    )
+    if st.button("Generate AI Draft Rules (Review Queue)"):
+        prompt = (draft_prompt or user_instruction or "").strip()
+        if not prompt:
+            st.warning("Draft instruction is empty.")
+        else:
+            semantic_context = _build_semantic_context(st.session_state.get("semantic_layer_spec") or {})
+            app_context = semantic_context.get("priority_domain") or "accounting_mail_invoice"
+            draft_spec, draft_error, draft_source = generate_intent_spec(
+                app_context=str(app_context),
+                goal=prompt,
+                scope="Generate reviewable business rules",
+                success="Rules can be reviewed and merged into active set",
+                artifacts="semantic-first automation",
+                use_ai=True,
+                model=instruction_model,
+            )
+            if draft_error:
+                st.warning(draft_error)
+
+            draft_rows = []
+            if isinstance(draft_spec, dict):
+                draft_inputs = draft_spec.get("inputs") or {}
+                draft_inputs["semantic_layer"] = semantic_context
+                draft_spec["inputs"] = draft_inputs
+                draft_rows, draft_warnings = build_rule_proposals_from_intent_spec(
+                    draft_spec,
+                    min_quality_score_gate=0.0,
+                )
+                for warning in draft_warnings:
+                    st.warning(warning)
+
+            if not draft_rows:
+                analyzed, intake_error, _ = analyze_and_log_user_instruction(
+                    user_instruction=prompt,
+                    log_path=INTAKE_LOGS_PATH,
+                    domain_hint=str(app_context),
+                    use_ai=True,
+                    model=instruction_model,
+                )
+                if isinstance(analyzed, dict):
+                    st.session_state["instruction_intake"] = analyzed
+                if intake_error:
+                    st.warning(intake_error)
+                fallback_text = _extract_instruction_text(analyzed if isinstance(analyzed, dict) else {}) or prompt
+                draft_rows = _fallback_rule_drafts_from_text(fallback_text)
+
+            if not draft_rows:
+                st.warning("No draft rules generated.")
+            else:
+                merged, summary = append_unique_rules(
+                    st.session_state.get("proposed_rules") or [],
+                    draft_rows,
+                )
+                st.session_state["proposed_rules"] = merged
+                if isinstance(draft_spec, dict):
+                    st.session_state["intent_spec"] = draft_spec
+                    st.session_state["intent_spec_source"] = draft_source
+                st.success(
+                    "AI draft rules queued for review: "
+                    f"added {summary['added']}, "
+                    f"skipped duplicates {summary['skipped_duplicates']}, "
+                    f"invalid {summary['skipped_invalid']}."
+                )
+                st.rerun()
 
     if st.button("Generate Candidates", type="primary"):
         log_mtime = _log_mtime(LOGS_PATH)
@@ -912,7 +1081,30 @@ with tabs[2]:
 with tabs[3]:
     st.markdown("<div class='psb-label'>Semantic Input / Intent Specification</div>", unsafe_allow_html=True)
     st.caption("Writes into semantic path: automation_assets.intent_spec / automation_assets.intent_spec_source")
-    st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
+    _render_input_hub_mapping(
+        "Input -> Hub Linkage (Intent)",
+        [
+            {
+                "input": "Conversation and focus selection",
+                "hub_path": "automation_assets.intent_spec",
+                "current": "ready"
+                if isinstance(st.session_state.get("intent_spec"), dict)
+                and str((st.session_state.get("intent_spec") or {}).get("spec_id") or "").strip()
+                else "missing",
+            },
+            {
+                "input": "Intent generation source",
+                "hub_path": "automation_assets.intent_spec_source",
+                "current": st.session_state.get("intent_spec_source") or "missing",
+            },
+            {
+                "input": "Mail rule mapping",
+                "hub_path": "automation_assets.intent_spec.inputs.mail_rule",
+                "current": "attached to intent spec",
+            },
+        ],
+    )
+    st.write("Convert ambiguous requests into an intent spec that is persisted in semantic hub.")
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
     llm_model = st.session_state.get("intent_llm_model", "gpt-4o-mini")
@@ -1240,6 +1432,28 @@ with tabs[4]:
         "and active metadata into one portable spec."
     )
     st.caption(f"Output path: {SEMANTIC_LAYER_PATH}")
+    _render_input_hub_mapping(
+        "Upstream Inputs -> Hub Paths",
+        [
+            {
+                "input_tab": "2) Semantic Input: Rules",
+                "hub_path": "automation_assets.rules / proposed_rules",
+                "current": f"rules {len(st.session_state.get('rules') or [])}, proposed {len(st.session_state.get('proposed_rules') or [])}",
+            },
+            {
+                "input_tab": "3) Semantic Input: Candidates",
+                "hub_path": "automation_assets.candidate_meta / candidate_rows / instruction_intake",
+                "current": f"candidates {len(st.session_state.get('ai_candidates') or [])}",
+            },
+            {
+                "input_tab": "4) Semantic Input: Intent",
+                "hub_path": "automation_assets.intent_spec / intent_spec_source",
+                "current": (st.session_state.get("intent_spec") or {}).get("spec_id", "missing")
+                if isinstance(st.session_state.get("intent_spec"), dict)
+                else "missing",
+            },
+        ],
+    )
 
     semantic_spec = _collect_semantic_payload_from_state(st.session_state.get("semantic_layer_spec") or {})
 

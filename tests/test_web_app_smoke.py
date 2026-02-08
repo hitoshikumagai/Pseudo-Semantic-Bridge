@@ -51,9 +51,15 @@ class _FakeStreamlit(types.ModuleType):
         return kwargs.get("value", 0)
 
     def text_area(self, label, **kwargs):
+        key = kwargs.get("key")
+        if key and key in self.session_state:
+            return self.session_state[key]
         return kwargs.get("value", "")
 
     def text_input(self, label, **kwargs):
+        key = kwargs.get("key")
+        if key and key in self.session_state:
+            return self.session_state[key]
         return kwargs.get("value", "")
 
     def checkbox(self, label, **kwargs):
@@ -352,3 +358,14 @@ def test_web_app_projects_semantic_assets_to_runtime(monkeypatch):
     assert tracker["saved_rules_payloads"]
     assert tracker["saved_rules_payloads"][-1] == semantic_rules
     assert tracker["start_job"] == 1
+
+
+def test_web_app_ai_rule_draft_added_to_review_queue(monkeypatch):
+    _module, fake_st, _tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"Generate AI Draft Rules (Review Queue)"},
+        initial_session_state={"rule_draft_prompt_input": "Prioritize OCR for invoice mails"},
+    )
+    proposed = fake_st.session_state.get("proposed_rules") or []
+    assert proposed
+    assert proposed[0]["task_name"] in {"AUTO_DRAFT", "AUTO"}

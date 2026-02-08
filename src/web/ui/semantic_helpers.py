@@ -312,6 +312,66 @@ def _runtime_readiness_issues(spec: dict) -> list[str]:
     return issues
 
 
+def _decision_support_rows(spec: dict) -> list[dict]:
+    rows = []
+    for item in _runtime_prerequisite_rows(spec):
+        if item.get("status") == "ready":
+            continue
+        path = str(item.get("path") or "")
+        if path == "purpose.objective_statement":
+            rows.append(
+                {
+                    "priority": 1,
+                    "decision": "Define business objective",
+                    "why": "Run should align to a measurable business goal.",
+                    "next_action": "Set objective statement in Semantic Layer Hub.",
+                    "owner_tab": item.get("fix_in_tab"),
+                }
+            )
+        elif path == "purpose.priority_domain":
+            rows.append(
+                {
+                    "priority": 2,
+                    "decision": "Set priority domain",
+                    "why": "Domain context steers intent and rule generation.",
+                    "next_action": "Set priority domain in Semantic Layer Hub.",
+                    "owner_tab": item.get("fix_in_tab"),
+                }
+            )
+        elif path == "automation_assets.intent_spec":
+            rows.append(
+                {
+                    "priority": 3,
+                    "decision": "Generate intent specification",
+                    "why": "Run requires executable intent context with spec_id.",
+                    "next_action": "Generate intent spec from Intent tab.",
+                    "owner_tab": item.get("fix_in_tab"),
+                }
+            )
+        elif path == "automation_assets.rules":
+            rows.append(
+                {
+                    "priority": 4,
+                    "decision": "Prepare active rules",
+                    "why": "Run dispatch cannot proceed without executable rules.",
+                    "next_action": "Create or merge rules in Rules tab.",
+                    "owner_tab": item.get("fix_in_tab"),
+                }
+            )
+    if not rows:
+        return [
+            {
+                "priority": 0,
+                "decision": "Run is ready",
+                "why": "All prerequisites are satisfied.",
+                "next_action": "Compile specs or run pipeline.",
+                "owner_tab": "6) Run Automation",
+            }
+        ]
+    rows.sort(key=lambda row: int(row.get("priority", 999)))
+    return rows
+
+
 def _semantic_source_rows(spec: dict) -> list[dict]:
     purpose = spec.get("purpose") if isinstance(spec.get("purpose"), dict) else {}
     assets = _get_semantic_assets(spec)

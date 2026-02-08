@@ -63,3 +63,6 @@ Important sections:
 
 If any prerequisite is missing, the UI shows blocking messages and does not start compile/run.
 The run tab also shows a prerequisite checklist table with current values and the target tab to fix each missing item.
+The run tab includes a `Decision Support Agent` section:
+- `AI Help: Suggest Next Decisions` suggests next steps from current missing prerequisites.
+- `AI Help: Draft Missing Prerequisites` drafts objective/domain/intent fields for review and can queue draft rules when rules are missing.

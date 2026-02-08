@@ -484,6 +484,26 @@ def test_runtime_prerequisite_rows_helper(monkeypatch):
     assert all(row["status"] == "ready" for row in rows)
 
 
+def test_decision_support_rows_helper(monkeypatch):
+    module, _fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
+    rows = module._decision_support_rows({"purpose": {}, "automation_assets": {}})
+    assert rows
+    assert rows[0]["decision"] == "Define business objective"
+
+
+def test_run_ai_draft_missing_prerequisites(monkeypatch):
+    _module, fake_st, _tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"AI Help: Draft Missing Prerequisites"},
+        initial_session_state={"semantic_layer_spec": {"purpose": {}, "automation_assets": {}}},
+    )
+    semantic_spec = fake_st.session_state.get("semantic_layer_spec") or {}
+    purpose = semantic_spec.get("purpose") if isinstance(semantic_spec.get("purpose"), dict) else {}
+    assert str(purpose.get("objective_statement") or "").strip()
+    assert str(purpose.get("priority_domain") or "").strip()
+    assert isinstance(fake_st.session_state.get("intent_spec"), dict)
+
+
 def test_candidate_ai_help_button_sets_message(monkeypatch):
     _module, fake_st, _tracker = _import_web_app_with_fakes(
         monkeypatch,

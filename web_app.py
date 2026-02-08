@@ -38,6 +38,7 @@ from src.web.ui.semantic_helpers import (
     _build_semantic_context,
     _collect_semantic_payload_from_state,
     _count_rows,
+    _decision_support_rows,
     _default_semantic_layer_spec,
     _extract_instruction_text,
     _fallback_rule_drafts_from_text,
@@ -358,6 +359,10 @@ if "intent_help_message" not in st.session_state:
     st.session_state["intent_help_message"] = ""
 if "candidate_help_message" not in st.session_state:
     st.session_state["candidate_help_message"] = ""
+if "run_decision_help_message" not in st.session_state:
+    st.session_state["run_decision_help_message"] = ""
+if "run_decision_help_spec" not in st.session_state:
+    st.session_state["run_decision_help_spec"] = None
 if "conversation_log" not in st.session_state:
     st.session_state["conversation_log"] = []
 if "conversation_rounds" not in st.session_state:
@@ -1625,6 +1630,132 @@ with tabs[5]:
             st.write(f"- {issue}")
     else:
         st.success("Run prerequisites are satisfied.")
+
+    st.markdown("<div class='psb-label'>Decision Support Agent</div>", unsafe_allow_html=True)
+    st.caption("Use AI suggestions to decide the next actions and draft missing prerequisite fields.")
+    st.dataframe(_decision_support_rows(runtime_semantic_payload), use_container_width=True, hide_index=True)
+    decision_context = st.text_area(
+        "Decision context (optional)",
+        value="",
+        placeholder="e.g. Keep this minimal and executable for invoice automation.",
+        height=70,
+        key="run_decision_context",
+    )
+    decision_model = st.text_input(
+        "Decision support model",
+        value=st.session_state.get("intent_llm_model", "gpt-4o-mini"),
+        key="run_decision_model",
+    )
+    decision_col_a, decision_col_b = st.columns([1, 1])
+    with decision_col_a:
+        if st.button("AI Help: Suggest Next Decisions"):
+            missing_labels = [
+                f"{row.get('path')} ({row.get('fix_in_tab')})"
+                for row in prerequisite_rows
+                if row.get("status") != "ready"
+            ]
+            decision_goal = (decision_context or "").strip() or (
+                "Unblock run prerequisites: " + (", ".join(missing_labels) if missing_labels else "already ready")
+            )
+            ai_spec, ai_error, ai_source = generate_intent_spec(
+                app_context="run_decision_support",
+                goal=decision_goal,
+                scope="Provide concise next decisions to unblock automation run",
+                success="User can take clear next steps in current tabs",
+                artifacts="semantic-layer workflow",
+                use_ai=True,
+                model=decision_model,
+            )
+            if ai_error:
+                st.warning(ai_error)
+            ai_steps = ai_spec.get("steps") if isinstance(ai_spec, dict) else []
+            step_labels = []
+            if isinstance(ai_steps, list):
+                for step in ai_steps[:5]:
+                    if isinstance(step, dict):
+                        step_labels.append(str(step.get("action") or step.get("id") or "step"))
+            st.session_state["run_decision_help_message"] = (
+                f"AI decision support ({ai_source}): "
+                f"{', '.join(step_labels) if step_labels else '(no step suggestions)'}"
+            )
+            st.session_state["run_decision_help_spec"] = ai_spec if isinstance(ai_spec, dict) else None
+    with decision_col_b:
+        if st.button("AI Help: Draft Missing Prerequisites"):
+            missing_paths = {
+                str(row.get("path") or "")
+                for row in prerequisite_rows
+                if row.get("status") != "ready"
+            }
+            if not missing_paths:
+                st.session_state["run_decision_help_message"] = "All prerequisites are already satisfied."
+                st.rerun()
+            decision_goal = (decision_context or "").strip() or "Draft missing run prerequisites for semantic workflow."
+            ai_spec, ai_error, ai_source = generate_intent_spec(
+                app_context="run_prerequisite_draft",
+                goal=decision_goal,
+                scope="Draft objective/domain/intent context for immediate next-step execution",
+                success="Missing prerequisites get draft values for user review",
+                artifacts="semantic-layer run gate",
+                use_ai=True,
+                model=decision_model,
+            )
+            if ai_error:
+                st.warning(ai_error)
+            updated_payload = _merge_semantic_spec(_default_semantic_layer_spec(), runtime_semantic_payload)
+            applied = []
+            purpose = updated_payload.get("purpose") if isinstance(updated_payload.get("purpose"), dict) else {}
+            assets = updated_payload.get("automation_assets") if isinstance(updated_payload.get("automation_assets"), dict) else {}
+
+            if "purpose.objective_statement" in missing_paths:
+                objective_draft = str((ai_spec or {}).get("intent") or decision_goal).strip()
+                if objective_draft:
+                    purpose["objective_statement"] = objective_draft
+                    applied.append("purpose.objective_statement")
+            if "purpose.priority_domain" in missing_paths:
+                domain_draft = str((ai_spec or {}).get("domain") or "operations").strip()
+                if domain_draft:
+                    purpose["priority_domain"] = domain_draft
+                    applied.append("purpose.priority_domain")
+            if "automation_assets.intent_spec" in missing_paths and isinstance(ai_spec, dict):
+                spec_id = str(ai_spec.get("spec_id") or "").strip()
+                if not spec_id:
+                    ai_spec["spec_id"] = f"spec-draft-{int(time.time())}"
+                assets["intent_spec"] = ai_spec
+                assets["intent_spec_source"] = ai_source
+                st.session_state["intent_spec"] = ai_spec
+                st.session_state["intent_spec_source"] = ai_source
+                _upsert_intent_history(ai_spec, ai_source)
+                applied.append("automation_assets.intent_spec")
+            if "automation_assets.rules" in missing_paths and isinstance(ai_spec, dict):
+                draft_rows, _draft_warnings = build_rule_proposals_from_intent_spec(
+                    ai_spec,
+                    min_quality_score_gate=0.0,
+                )
+                if not draft_rows:
+                    draft_rows = _fallback_rule_drafts_from_text(decision_goal)
+                merged_proposed, summary = append_unique_rules(st.session_state.get("proposed_rules") or [], draft_rows)
+                st.session_state["proposed_rules"] = merged_proposed
+                applied.append(
+                    "automation_assets.proposed_rules "
+                    f"(queued {summary['added']}, duplicates {summary['skipped_duplicates']})"
+                )
+
+            updated_payload["purpose"] = purpose
+            updated_payload["automation_assets"] = assets
+            st.session_state["semantic_layer_spec"] = updated_payload
+            _load_working_state_from_semantic(updated_payload)
+            st.session_state["run_decision_help_spec"] = ai_spec if isinstance(ai_spec, dict) else None
+            st.session_state["run_decision_help_message"] = (
+                "Drafted fields: " + (", ".join(applied) if applied else "none applied")
+            )
+            st.rerun()
+
+    if st.session_state.get("run_decision_help_message"):
+        st.info(st.session_state["run_decision_help_message"])
+    if isinstance(st.session_state.get("run_decision_help_spec"), dict):
+        with st.expander("Decision Agent Draft Spec", expanded=False):
+            st.json(st.session_state["run_decision_help_spec"])
+
     st.markdown(
         "<div class='psb-card'>"
         "<div class='psb-label'>Config</div>"

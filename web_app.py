@@ -48,6 +48,7 @@ from src.web.ui.semantic_helpers import (
     _merge_semantic_spec,
     _normalize_dict_rows,
     _prepare_runtime_from_semantic as _prepare_runtime_from_semantic_impl,
+    _runtime_prerequisite_rows,
     _queue_missing_ir_rules,
     _render_input_hub_mapping,
     _rule_signature,
@@ -1612,8 +1613,12 @@ with tabs[5]:
     st.markdown("<div class='psb-label'>Run Automation</div>", unsafe_allow_html=True)
     st.caption("Run uses the semantic-layer aggregated assets as the final automation input.")
     runtime_semantic_payload = _collect_semantic_payload_from_state(st.session_state.get("semantic_layer_spec") or {})
+    prerequisite_rows = _runtime_prerequisite_rows(runtime_semantic_payload)
     run_issues = _runtime_readiness_issues(runtime_semantic_payload)
     st.markdown("<div class='psb-label'>Run Prerequisites</div>", unsafe_allow_html=True)
+    ready_count = len([row for row in prerequisite_rows if row.get("status") == "ready"])
+    st.caption(f"Ready {ready_count}/{len(prerequisite_rows)} prerequisites.")
+    st.dataframe(prerequisite_rows, use_container_width=True, hide_index=True)
     if run_issues:
         st.warning("Run prerequisites are not complete yet.")
         for issue in run_issues:

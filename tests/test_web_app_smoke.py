@@ -470,6 +470,20 @@ def test_semantic_mermaid_from_spec_helper(monkeypatch):
     assert "Run Automation" in mermaid_text
 
 
+def test_runtime_prerequisite_rows_helper(monkeypatch):
+    module, _fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
+    semantic_spec = {
+        "purpose": {"objective_statement": "Keep SLA", "priority_domain": "ops"},
+        "automation_assets": {
+            "rules": [{"subject_filter": "Invoice", "action_id": "ocr_process", "require_attachment": True}],
+            "intent_spec": {"spec_id": "spec-run"},
+        },
+    }
+    rows = module._runtime_prerequisite_rows(semantic_spec)
+    assert len(rows) == 4
+    assert all(row["status"] == "ready" for row in rows)
+
+
 def test_candidate_ai_help_button_sets_message(monkeypatch):
     _module, fake_st, _tracker = _import_web_app_with_fakes(
         monkeypatch,

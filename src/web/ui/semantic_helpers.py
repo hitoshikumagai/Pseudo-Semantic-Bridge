@@ -263,21 +263,52 @@ def _prepare_runtime_from_semantic(save_rules_fn, rules_path: Path) -> dict:
     return st.session_state.get("intent_spec") if isinstance(st.session_state.get("intent_spec"), dict) else {}
 
 
-def _runtime_readiness_issues(spec: dict) -> list[str]:
-    issues = []
+def _runtime_prerequisite_rows(spec: dict) -> list[dict]:
     purpose = spec.get("purpose") if isinstance(spec.get("purpose"), dict) else {}
     assets = _get_semantic_assets(spec)
     rules = _normalize_dict_rows(assets.get("rules"))
-    intent_spec = assets.get("intent_spec")
+    intent_spec = assets.get("intent_spec") if isinstance(assets.get("intent_spec"), dict) else {}
+    intent_spec_id = str(intent_spec.get("spec_id") or "").strip()
+    return [
+        {
+            "requirement": "Business objective",
+            "path": "purpose.objective_statement",
+            "status": "ready" if str(purpose.get("objective_statement") or "").strip() else "missing",
+            "current": str(purpose.get("objective_statement") or "").strip() or "(empty)",
+            "fix_in_tab": "5) Semantic Layer Hub",
+        },
+        {
+            "requirement": "Priority domain",
+            "path": "purpose.priority_domain",
+            "status": "ready" if str(purpose.get("priority_domain") or "").strip() else "missing",
+            "current": str(purpose.get("priority_domain") or "").strip() or "(empty)",
+            "fix_in_tab": "5) Semantic Layer Hub",
+        },
+        {
+            "requirement": "Active rules",
+            "path": "automation_assets.rules",
+            "status": "ready" if rules else "missing",
+            "current": len(rules),
+            "fix_in_tab": "2) Semantic Input: Rules",
+        },
+        {
+            "requirement": "Intent spec",
+            "path": "automation_assets.intent_spec",
+            "status": "ready" if intent_spec_id else "missing",
+            "current": intent_spec_id or "(missing)",
+            "fix_in_tab": "4) Semantic Input: Intent",
+        },
+    ]
 
-    if not str(purpose.get("objective_statement") or "").strip():
-        issues.append("Missing purpose.objective_statement in semantic layer.")
-    if not str(purpose.get("priority_domain") or "").strip():
-        issues.append("Missing purpose.priority_domain in semantic layer.")
-    if not rules:
-        issues.append("No semantic rules found in automation_assets.rules.")
-    if not isinstance(intent_spec, dict) or not str(intent_spec.get("spec_id") or "").strip():
-        issues.append("Missing semantic intent spec in automation_assets.intent_spec.")
+
+def _runtime_readiness_issues(spec: dict) -> list[str]:
+    issues = []
+    for row in _runtime_prerequisite_rows(spec):
+        if row.get("status") == "ready":
+            continue
+        path = str(row.get("path") or "")
+        fix_tab = str(row.get("fix_in_tab") or "")
+        issues.append(f"Missing {path}. Update in {fix_tab}.")
     return issues
 
 

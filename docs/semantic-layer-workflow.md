@@ -62,3 +62,4 @@ Important sections:
 - `automation_assets.intent_spec.spec_id` exists.
 
 If any prerequisite is missing, the UI shows blocking messages and does not start compile/run.
+The run tab also shows a prerequisite checklist table with current values and the target tab to fix each missing item.

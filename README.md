@@ -176,6 +176,12 @@ conda activate pseudo-semantic-bridge
 pytest -q
 ```
 
+If your current shell does not have all dependencies, run tests directly in the project conda env:
+
+```bash
+conda run -n pseudo-semantic-bridge pytest -q
+```
+
 ---
 
 ## 🚀 Usage Workflow

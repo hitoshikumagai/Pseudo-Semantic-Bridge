@@ -128,13 +128,16 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None):
     fake_adapter.OutlookAdapter = OutlookAdapter
     monkeypatch.setitem(sys.modules, "src.adapter.outlook", fake_adapter)
 
-    tracker = {"run_engine_job": 0, "start_job": 0}
+    tracker = {"run_engine_job": 0, "start_job": 0, "save_rules": 0}
     fake_app_logic = types.ModuleType("src.web.app_logic")
     fake_app_logic.load_rules = lambda _path: []
     fake_app_logic.load_jsonl_runs = lambda _path: []
     fake_app_logic.load_jsonl_runs_tail = lambda _path, max_lines=200: []
     fake_app_logic.propose_rule_candidates = lambda *_args, **_kwargs: ([], [])
-    fake_app_logic.save_rules = lambda *_args, **_kwargs: None
+    def save_rules(*_args, **_kwargs):
+        tracker["save_rules"] += 1
+
+    fake_app_logic.save_rules = save_rules
     fake_app_logic.append_unique_rules = (
         lambda existing, incoming: (
             (existing or []) + (incoming or []),
@@ -264,7 +267,14 @@ def test_web_app_import_smoke(monkeypatch):
     module, fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
     assert module.APP_TITLE == "Pseudo Semantic Bridge"
     assert "rules" in fake_st.session_state
+    assert "semantic_layer_spec" in fake_st.session_state
+    semantic_spec = fake_st.session_state["semantic_layer_spec"]
+    assert "automation_assets" in semantic_spec
+    assert semantic_spec["automation_assets"]["rules"]
     assert any(call[0] == "tabs" for call in fake_st.calls)
+    tab_calls = [call for call in fake_st.calls if call[0] == "tabs"]
+    assert tab_calls
+    assert "Design: Semantic Layer" in tab_calls[0][1]
 
 
 def test_web_app_run_pipeline_smoke(monkeypatch):
@@ -272,6 +282,7 @@ def test_web_app_run_pipeline_smoke(monkeypatch):
         monkeypatch,
         pressed_buttons={"Run Pipeline"},
     )
+    assert tracker["save_rules"] >= 1
     assert tracker["start_job"] == 1
     assert tracker["run_engine_job"] == 1
     assert fake_st.session_state["last_job_id"] == "job-smoke"

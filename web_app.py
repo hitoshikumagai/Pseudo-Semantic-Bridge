@@ -261,15 +261,24 @@ def _default_semantic_layer_spec() -> dict:
             "domain_owners": [{"domain": "", "owner_team": "", "steward": "", "approval_sla_days": 5}],
             "guardrails": "",
         },
+        "automation_assets": {
+            "rules": [],
+            "proposed_rules": [],
+            "candidate_meta": [],
+            "candidate_rows": [],
+            "instruction_intake": None,
+            "intent_spec": None,
+            "intent_spec_source": None,
+        },
     }
 
 
 def _merge_semantic_spec(default_spec: dict, current_spec: dict) -> dict:
-    merged = dict(default_spec)
+    merged = dict(current_spec) if isinstance(current_spec, dict) else {}
     for key, default_value in default_spec.items():
-        current_value = current_spec.get(key)
+        current_value = current_spec.get(key) if isinstance(current_spec, dict) else None
         if isinstance(default_value, dict):
-            section = dict(default_value)
+            section = dict(current_value) if isinstance(current_value, dict) else {}
             if isinstance(current_value, dict):
                 for field, field_default in default_value.items():
                     field_value = current_value.get(field)
@@ -372,6 +381,74 @@ def _build_semantic_context(spec: dict) -> dict:
         "glossary_terms_count": _count_rows(business_semantics.get("glossary_terms")),
         "metadata_sources_count": _count_rows(technical_metadata.get("metadata_sources")),
     }
+
+
+def _normalize_dict_rows(value) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, dict)]
+
+
+def _get_semantic_assets(spec: dict) -> dict:
+    assets = spec.get("automation_assets")
+    return assets if isinstance(assets, dict) else {}
+
+
+def _load_working_state_from_semantic(spec: dict) -> None:
+    assets = _get_semantic_assets(spec)
+    semantic_rules = _normalize_dict_rows(assets.get("rules"))
+    semantic_proposed = _normalize_dict_rows(assets.get("proposed_rules"))
+    semantic_meta = _normalize_dict_rows(assets.get("candidate_meta"))
+    semantic_candidates = _normalize_dict_rows(assets.get("candidate_rows"))
+    semantic_instruction = assets.get("instruction_intake")
+    semantic_intent_spec = assets.get("intent_spec")
+    semantic_intent_source = assets.get("intent_spec_source")
+
+    if semantic_rules:
+        st.session_state["rules"] = semantic_rules
+    if semantic_proposed:
+        st.session_state["proposed_rules"] = semantic_proposed
+    if semantic_meta:
+        st.session_state["ai_meta"] = semantic_meta
+    if semantic_candidates:
+        st.session_state["ai_candidates"] = semantic_candidates
+    if isinstance(semantic_instruction, dict):
+        st.session_state["instruction_intake"] = semantic_instruction
+    if isinstance(semantic_intent_spec, dict):
+        st.session_state["intent_spec"] = semantic_intent_spec
+    if isinstance(semantic_intent_source, str):
+        st.session_state["intent_spec_source"] = semantic_intent_source
+
+
+def _collect_semantic_payload_from_state(base_spec: dict) -> dict:
+    merged = _merge_semantic_spec(_default_semantic_layer_spec(), base_spec if isinstance(base_spec, dict) else {})
+    merged["automation_assets"] = {
+        "rules": _normalize_dict_rows(st.session_state.get("rules")),
+        "proposed_rules": _normalize_dict_rows(st.session_state.get("proposed_rules")),
+        "candidate_meta": _normalize_dict_rows(st.session_state.get("ai_meta")),
+        "candidate_rows": _normalize_dict_rows(st.session_state.get("ai_candidates")),
+        "instruction_intake": st.session_state.get("instruction_intake")
+        if isinstance(st.session_state.get("instruction_intake"), dict)
+        else None,
+        "intent_spec": st.session_state.get("intent_spec") if isinstance(st.session_state.get("intent_spec"), dict) else None,
+        "intent_spec_source": st.session_state.get("intent_spec_source"),
+    }
+    return merged
+
+
+def _prepare_runtime_from_semantic() -> dict:
+    semantic_payload = _collect_semantic_payload_from_state(st.session_state.get("semantic_layer_spec") or {})
+    st.session_state["semantic_layer_spec"] = semantic_payload
+    assets = _get_semantic_assets(semantic_payload)
+    runtime_rules = _normalize_dict_rows(assets.get("rules"))
+    if runtime_rules:
+        st.session_state["rules"] = runtime_rules
+        save_rules(RULES_PATH, runtime_rules)
+    runtime_spec = assets.get("intent_spec")
+    if isinstance(runtime_spec, dict):
+        st.session_state["intent_spec"] = runtime_spec
+        return runtime_spec
+    return st.session_state.get("intent_spec") if isinstance(st.session_state.get("intent_spec"), dict) else {}
 
 
 def render_kpi(label: str, value: str):
@@ -478,6 +555,11 @@ if "conversation_focus" not in st.session_state:
 if "conversation_marked" not in st.session_state:
     st.session_state["conversation_marked"] = []
 
+_load_working_state_from_semantic(st.session_state.get("semantic_layer_spec") or {})
+st.session_state["semantic_layer_spec"] = _collect_semantic_payload_from_state(
+    st.session_state.get("semantic_layer_spec") or {}
+)
+
 with tabs[0]:
     log_mtime = _log_mtime(LOGS_PATH)
     start = time.perf_counter()
@@ -522,6 +604,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.markdown("<div class='psb-label'>Business Rules</div>", unsafe_allow_html=True)
+    st.caption("This tab contributes rule assets into the semantic layer definition.")
     edited = st.data_editor(
         st.session_state["rules"],
         num_rows="dynamic",
@@ -607,6 +690,7 @@ with tabs[1]:
 
 with tabs[2]:
     st.markdown("<div class='psb-label'>Design / Rule Builder</div>", unsafe_allow_html=True)
+    st.caption("Candidate outputs from this tab are aggregated into semantic-layer automation assets.")
     st.write("実行ログからルール候補を生成し、Rulesへ反映するための設計タブです。")
     st.caption("Output: executable rule rows (subject_filter, action_id, etc.)")
 
@@ -759,6 +843,7 @@ with tabs[2]:
 
 with tabs[3]:
     st.markdown("<div class='psb-label'>Design / Intent Specification</div>", unsafe_allow_html=True)
+    st.caption("Intent design in this tab is treated as semantic-layer context for final automation run.")
     st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
@@ -1088,10 +1173,7 @@ with tabs[4]:
     )
     st.caption(f"Output path: {SEMANTIC_LAYER_PATH}")
 
-    semantic_spec = _merge_semantic_spec(
-        _default_semantic_layer_spec(),
-        st.session_state.get("semantic_layer_spec") or {},
-    )
+    semantic_spec = _collect_semantic_payload_from_state(st.session_state.get("semantic_layer_spec") or {})
 
     purpose = semantic_spec.get("purpose") if isinstance(semantic_spec.get("purpose"), dict) else {}
     technical_metadata = (
@@ -1279,6 +1361,7 @@ with tabs[4]:
             "guardrails": guardrails,
         },
     }
+    semantic_payload = _collect_semantic_payload_from_state(semantic_payload)
     st.session_state["semantic_layer_spec"] = semantic_payload
     semantic_summary = _summarize_semantic_layer(semantic_payload)
 
@@ -1306,18 +1389,12 @@ with tabs[4]:
     with save_col_b:
         if st.button("Reload Semantic Layer Definition"):
             st.session_state["semantic_layer_spec"] = _load_semantic_layer_spec(SEMANTIC_LAYER_PATH)
+            _load_working_state_from_semantic(st.session_state.get("semantic_layer_spec") or {})
             st.rerun()
     with save_col_c:
-        if st.button("Attach To Current Intent Spec"):
-            current_spec = st.session_state.get("intent_spec")
-            if not current_spec:
-                st.warning("Intent Spec not generated yet.")
-            else:
-                spec_inputs = current_spec.get("inputs") or {}
-                spec_inputs["semantic_layer"] = _build_semantic_context(semantic_payload)
-                current_spec["inputs"] = spec_inputs
-                st.session_state["intent_spec"] = current_spec
-                st.success("Semantic context attached to current Intent Spec.")
+        if st.button("Apply Semantic Assets To Tabs"):
+            _load_working_state_from_semantic(st.session_state.get("semantic_layer_spec") or {})
+            st.success("Semantic assets applied to working tabs.")
 
     st.markdown("<div class='psb-label'>Semantic Layer Spec Preview</div>", unsafe_allow_html=True)
     st.json(semantic_payload)
@@ -1325,6 +1402,7 @@ with tabs[4]:
 with tabs[5]:
     jobs = st.session_state.setdefault("jobs", {})
     st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
+    st.caption("Run uses the semantic-layer aggregated assets as the final automation input.")
     st.markdown(
         "<div class='psb-card'>"
         "<div class='psb-label'>Config</div>"
@@ -1339,6 +1417,7 @@ with tabs[5]:
     run_col_a, run_col_b = st.columns([1, 1])
     with run_col_a:
         if st.button("Compile Specs Only"):
+            _prepare_runtime_from_semantic()
             compile_summary = run_bridge_compile_summary(
                 build_all_configs,
                 SYSTEM_CONFIG_PATH,
@@ -1354,11 +1433,11 @@ with tabs[5]:
             if OutlookAdapter is None:
                 st.error(f"Outlook adapter is unavailable: {OUTLOOK_IMPORT_ERROR}")
                 st.stop()
+            current_spec = _prepare_runtime_from_semantic()
             log_mtime = _log_mtime(LOGS_PATH)
             start = time.perf_counter()
             baseline_count = len(load_runs_cached(str(LOGS_PATH), log_mtime))
             _record_perf("run.baseline_count", time.perf_counter() - start, baseline_count)
-            current_spec = st.session_state.get("intent_spec") or {}
 
             def _run(current_job_id: str):
                 run_engine_job(

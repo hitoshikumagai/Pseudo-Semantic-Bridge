@@ -95,5 +95,14 @@
       }
     ],
     "guardrails": ""
+  },
+  "automation_assets": {
+    "rules": [],
+    "proposed_rules": [],
+    "candidate_meta": [],
+    "candidate_rows": [],
+    "instruction_intake": null,
+    "intent_spec": null,
+    "intent_spec_source": null
   }
 }

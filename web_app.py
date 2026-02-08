@@ -175,8 +175,8 @@ def _split_chunks(text: str) -> list[str]:
     cleaned = (text or "").strip()
     if not cleaned:
         return []
-    cleaned = cleaned.replace("・", " ")
-    parts = re.split(r"[、。/|\n]+", cleaned)
+    cleaned = cleaned.replace("\u30fb", " ")
+    parts = re.split(r"[\u3001\u3002/|\n]+", cleaned)
     chunks = [part.strip() for part in parts if part.strip()]
     return chunks if chunks else [cleaned]
 
@@ -248,7 +248,7 @@ st.markdown(
 
 st.write("")
 
-tabs = st.tabs(["Overview", "Rules", "Design: Rule Builder", "Design: Intent Spec", "Run"])
+tabs = st.tabs(["Automation Summary", "Automation Pipelines"])
 
 if "perf_debug" not in st.session_state:
     st.session_state["perf_debug"] = False
@@ -291,6 +291,8 @@ if "instruction_intake" not in st.session_state:
 
 if "compile_summary" not in st.session_state:
     st.session_state["compile_summary"] = None
+if "jobs" not in st.session_state:
+    st.session_state["jobs"] = {}
 if "conversation_log" not in st.session_state:
     st.session_state["conversation_log"] = []
 if "conversation_rounds" not in st.session_state:
@@ -305,10 +307,15 @@ if "conversation_marked" not in st.session_state:
     st.session_state["conversation_marked"] = []
 
 with tabs[0]:
+    st.markdown("<div class='psb-label'>Automation Summary</div>", unsafe_allow_html=True)
+    st.write("Review key metrics, recent logs, and job status in one place.")
+    if st.button("Refresh Summary"):
+        st.rerun()
+
     log_mtime = _log_mtime(LOGS_PATH)
     start = time.perf_counter()
     runs = load_runs_cached(str(LOGS_PATH), log_mtime)
-    _record_perf("overview.load_runs_full", time.perf_counter() - start, len(runs))
+    _record_perf("summary.load_runs_full", time.perf_counter() - start, len(runs))
     summary = summarize_quality(runs) if runs else {"total": 0, "success": 0, "quality_labeled": 0, "quality_ok": 0}
     success_rate = round((summary["success"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
     quality_rate = round((summary["quality_ok"] / summary["total"]) * 100, 1) if summary["total"] else 0.0
@@ -334,8 +341,152 @@ with tabs[0]:
     with col_g:
         render_skeleton_card("Run Timeline", [90, 65, 72, 58])
 
+    st.write("")
+    st.markdown("<div class='psb-label'>Run Log Summary</div>", unsafe_allow_html=True)
+    summary_col, detail_col = st.columns([1, 1])
+    with summary_col:
+        tail_limit = st.number_input("Global log lines (tail)", min_value=50, max_value=2000, value=300, step=50)
+    with detail_col:
+        show_global_detail = st.checkbox("Show global detail table", value=False)
+
+    log_mtime = _log_mtime(LOGS_PATH)
+    start = time.perf_counter()
+    all_runs = load_runs_tail_cached(str(LOGS_PATH), log_mtime, max_lines=int(tail_limit))
+    _record_perf("summary.load_runs_tail", time.perf_counter() - start, len(all_runs))
+    global_summary = summarize_run_window(all_runs, start_index=0)
+    st.markdown("<div class='psb-label'>Global Run Summary (Jupyter + Web)</div>", unsafe_allow_html=True)
+    g1, g2, g3, g4 = st.columns(4)
+    with g1:
+        st.metric("Processed", global_summary["total"])
+    with g2:
+        st.metric("Success", global_summary["success"])
+    with g3:
+        st.metric("Error", global_summary["error"])
+    with g4:
+        st.metric("Artifacts", global_summary["with_output"])
+    if global_summary["workflows"]:
+        st.caption(f"Workflows: {', '.join(global_summary['workflows'])}")
+    if global_summary["latest_timestamp"]:
+        st.caption(f"Latest log time: {global_summary['latest_timestamp']}")
+    if global_summary["latest_error"]:
+        st.warning(f"Latest error: {global_summary['latest_error']}")
+
+    if show_global_detail:
+        st.markdown("<div class='psb-label'>Global Run Detail</div>", unsafe_allow_html=True)
+        global_detail_rows = summarize_run_detail_rows(
+            all_runs,
+            start_index=0,
+            limit=100,
+        )
+        if global_detail_rows:
+            st.dataframe(global_detail_rows, use_container_width=True)
+        else:
+            st.info("No logs found yet.")
+
+    jobs = st.session_state["jobs"]
+    last_job_id = st.session_state.get("last_job_id")
+    if last_job_id and last_job_id in jobs:
+        log_mtime = _log_mtime(LOGS_PATH)
+        start = time.perf_counter()
+        current_runs = load_runs_cached(str(LOGS_PATH), log_mtime)
+        _record_perf("summary.load_runs_full", time.perf_counter() - start, len(current_runs))
+        last_job = jobs[last_job_id]
+        duration_sec = compute_job_duration_seconds(last_job)
+        st.markdown("<div class='psb-label'>Last Triggered Job Summary (Web only)</div>", unsafe_allow_html=True)
+        window_summary = summarize_run_window(
+            current_runs,
+            start_index=int(last_job.get("log_start_index", 0)),
+        )
+        s1, s2, s3, s4 = st.columns(4)
+        with s1:
+            st.metric("Processed", window_summary["total"])
+        with s2:
+            st.metric("Success", window_summary["success"])
+        with s3:
+            st.metric("Error", window_summary["error"])
+        with s4:
+            st.metric("Artifacts", window_summary["with_output"])
+        if window_summary["workflows"]:
+            st.caption(f"Workflows: {', '.join(window_summary['workflows'])}")
+        if window_summary["latest_timestamp"]:
+            st.caption(f"Latest log time: {window_summary['latest_timestamp']}")
+        if window_summary["latest_error"]:
+            st.warning(f"Latest error: {window_summary['latest_error']}")
+
+        st.markdown("<div class='psb-label'>Last Triggered Job Detail (Web only)</div>", unsafe_allow_html=True)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            st.caption(f"job_id: {last_job_id}")
+        with c2:
+            st.caption(f"status: {last_job.get('status', '-')}")
+        with c3:
+            st.caption(f"started_at: {last_job.get('started_at', '-')}")
+        with c4:
+            st.caption(f"ended_at: {last_job.get('ended_at', '-')}")
+        with c5:
+            st.caption(f"duration_sec: {duration_sec if duration_sec is not None else '-'}")
+
+        detail_rows = summarize_run_detail_rows(
+            current_runs,
+            start_index=int(last_job.get("log_start_index", 0)),
+            limit=100,
+        )
+        if detail_rows:
+            st.dataframe(detail_rows, use_container_width=True)
+        else:
+            st.info("No detailed logs found for this run window yet.")
+
+        pipeline_summary = last_job.get("pipeline_summary")
+        if pipeline_summary:
+            st.markdown("<div class='psb-label'>Notebook Baseline Summary</div>", unsafe_allow_html=True)
+            st.caption(
+                f"status: {pipeline_summary.get('status')} | "
+                f"started_at: {pipeline_summary.get('started_at')} | "
+                f"ended_at: {pipeline_summary.get('ended_at')}"
+            )
+            st.dataframe(pipeline_summary.get("artifacts", []), use_container_width=True)
+            if pipeline_summary.get("error"):
+                st.warning(f"Pipeline error: {pipeline_summary.get('error')}")
+
+    compile_summary = st.session_state.get("compile_summary")
+    if compile_summary:
+        st.markdown("<div class='psb-label'>Last Compile Summary</div>", unsafe_allow_html=True)
+        st.caption(
+            f"status: {compile_summary.get('status')} | "
+            f"started_at: {compile_summary.get('started_at')} | "
+            f"ended_at: {compile_summary.get('ended_at')}"
+        )
+        st.dataframe(compile_summary.get("artifacts", []), use_container_width=True)
+        if compile_summary.get("error"):
+            st.warning(f"Compile error: {compile_summary.get('error')}")
+
+    st.markdown("<div class='psb-label'>Job Status</div>", unsafe_allow_html=True)
+    if not jobs:
+        st.info("No jobs yet.")
+    else:
+        for job_id, info in list(jobs.items())[::-1]:
+            spec_label = info.get("spec_id", "-")
+            st.write(f"{job_id} | spec: {spec_label} | status: {info['status']}")
+
+    with st.expander("Performance (Debug)", expanded=False):
+        st.session_state["perf_debug"] = st.checkbox("Show timings", value=st.session_state.get("perf_debug", False))
+        if st.session_state.get("perf_debug"):
+            marks = st.session_state.get("perf_marks") or []
+            if marks:
+                rows = [
+                    {"label": label, "seconds": round(seconds, 4), "items": count}
+                    for label, seconds, count in marks[-20:]
+                ]
+                st.dataframe(rows, use_container_width=True)
+            else:
+                st.info("No timings captured yet.")
+
 with tabs[1]:
-    st.markdown("<div class='psb-label'>Business Rules</div>", unsafe_allow_html=True)
+    st.markdown("<div class='psb-label'>Automation Pipelines</div>", unsafe_allow_html=True)
+    st.write("Summaries, inputs, outputs, and controls for each pipeline live here.")
+
+    st.markdown("<div class='psb-label'>Pipeline A: Rule Operations</div>", unsafe_allow_html=True)
+    st.write("Manage existing and proposed rules, and merge into production.")
     edited = st.data_editor(
         st.session_state["rules"],
         num_rows="dynamic",
@@ -399,7 +550,7 @@ with tabs[1]:
             if not selected_indices:
                 st.warning("No proposed rules selected.")
             else:
-                merged_rules, remaining, summary = merge_proposed_rules(
+                merged_rules, remaining, merge_summary = merge_proposed_rules(
                     existing_rules=st.session_state["rules"],
                     proposed_rules=st.session_state["proposed_rules"],
                     selected_indices=selected_indices,
@@ -411,17 +562,17 @@ with tabs[1]:
                 st.session_state["proposed_rules"] = remaining
                 st.success(
                     "Merged "
-                    f"{summary['merged']} rules "
-                    f"(skipped duplicates {summary['skipped_duplicates']}, "
-                    f"conflicts {summary['skipped_conflicts']}, "
-                    f"quality gate {summary['skipped_quality_gate']}, "
-                    f"invalid {summary['skipped_invalid']})."
+                    f"{merge_summary['merged']} rules "
+                    f"(skipped duplicates {merge_summary['skipped_duplicates']}, "
+                    f"conflicts {merge_summary['skipped_conflicts']}, "
+                    f"quality gate {merge_summary['skipped_quality_gate']}, "
+                    f"invalid {merge_summary['skipped_invalid']})."
                 )
                 st.rerun()
 
-with tabs[2]:
-    st.markdown("<div class='psb-label'>Design / Rule Builder</div>", unsafe_allow_html=True)
-    st.write("実行ログからルール候補を生成し、Rulesへ反映するための設計タブです。")
+    st.write("")
+    st.markdown("<div class='psb-label'>Pipeline B: Rule Candidate Generation</div>", unsafe_allow_html=True)
+    st.write("Generate rule candidates from run logs and feed them into rule operations.")
     st.caption("Output: executable rule rows (subject_filter, action_id, etc.)")
 
     col_a, col_b, col_c = st.columns([1, 1, 1])
@@ -440,7 +591,7 @@ with tabs[2]:
 
     user_instruction = st.text_area(
         "User instruction",
-        placeholder="例: 請求書はOCRを優先。日報は保存のみ。",
+        placeholder="e.g. Prioritize OCR for invoices. Save daily reports only.",
         height=80,
     )
     col_i1, col_i2 = st.columns([1, 1])
@@ -451,7 +602,7 @@ with tabs[2]:
 
     col_i3, col_i4 = st.columns([1, 1])
     with col_i3:
-        if st.button("Instruction 解析 (AI)"):
+        if st.button("Analyze Instruction (AI)"):
             analyzed, error, source = analyze_and_log_user_instruction(
                 user_instruction=user_instruction,
                 log_path=INTAKE_LOGS_PATH,
@@ -465,7 +616,7 @@ with tabs[2]:
             else:
                 st.success("Instruction analyzed by AI and logged.")
     with col_i4:
-        if st.button("Instruction 解析 (Template)"):
+        if st.button("Analyze Instruction (Template)"):
             analyzed, error, source = analyze_and_log_user_instruction(
                 user_instruction=user_instruction,
                 log_path=INTAKE_LOGS_PATH,
@@ -571,14 +722,14 @@ with tabs[2]:
     else:
         render_skeleton_card("Candidate Rows Table", [92, 66, 82, 54])
 
-with tabs[3]:
-    st.markdown("<div class='psb-label'>Design / Intent Specification</div>", unsafe_allow_html=True)
-    st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
+    st.write("")
+    st.markdown("<div class='psb-label'>Pipeline C: Intent Spec Generation</div>", unsafe_allow_html=True)
+    st.write("Translate ambiguous requests into an Intent Spec (IR) and pass it to execution.")
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
     llm_model = st.session_state.get("intent_llm_model", "gpt-4o-mini")
 
-    mail_subject_filter = st.session_state.get("mail_subject_filter", "請求書")
+    mail_subject_filter = st.session_state.get("mail_subject_filter", "Invoice")
     mail_task_name = st.session_state.get("mail_task_name", "INVOICE")
     mail_require_attachment = st.session_state.get("mail_require_attachment", True)
     mail_action_id = st.session_state.get("mail_action_id", "ocr_process")
@@ -586,7 +737,6 @@ with tabs[3]:
     if not isinstance(mail_params, dict):
         mail_params = {}
 
-    st.markdown("<div class='psb-label'>Minimal Flow</div>", unsafe_allow_html=True)
     st.markdown("<div class='psb-label'>Conversation Assist</div>", unsafe_allow_html=True)
     if st.session_state["conversation_log"]:
         for entry in st.session_state["conversation_log"]:
@@ -597,12 +747,12 @@ with tabs[3]:
     else:
         st.caption("Conversation log is empty.")
 
-    user_message = st.chat_input("やりたいことを入力してください")
+    user_message = st.chat_input("Describe what you want to do")
     if user_message:
         st.session_state["conversation_log"].append({"role": "user", "content": user_message})
         allow_more_needed = st.session_state["conversation_rounds"] >= 3 and not st.session_state["conversation_allow_more"]
         if allow_more_needed:
-            st.warning("質問は3回まで。さらに必要なら許可してください。")
+            st.warning("Up to 3 questions. Allow more if needed.")
         else:
             question, error, source = generate_followup_question(
                 conversation=st.session_state["conversation_log"],
@@ -655,7 +805,7 @@ with tabs[3]:
             chunks.extend(_split_chunks(bullet))
         chunks = _dedupe_chunks(chunks)
         marked = st.multiselect(
-            "興味のある文字の塊をマーキング",
+            "Mark interesting text chunks",
             chunks,
             default=st.session_state.get("conversation_marked") or [],
         )
@@ -665,11 +815,11 @@ with tabs[3]:
                 st.warning("Marked chunks are empty.")
             else:
                 st.session_state["conversation_focus"] = " / ".join(marked)
-        focus_choice = st.selectbox("興味のあるポイントを選択", summary_bullets)
+        focus_choice = st.selectbox("Select a focus point", summary_bullets)
         if st.button("Confirm Focus"):
             st.session_state["conversation_focus"] = focus_choice
 
-    if st.button("Intent Spec 生成 (Conversation)", type="primary"):
+    if st.button("Generate Intent Spec (Conversation)", type="primary"):
         focus = st.session_state.get("conversation_focus")
         if not focus:
             st.warning("Focus is not confirmed yet.")
@@ -703,45 +853,45 @@ with tabs[3]:
         col_a, col_b = st.columns([2, 1])
         with col_a:
             app_context = st.text_input(
-                "対象アプリ/領域",
-                value="メール",
-                help="例: メール, 受発注, 請求書管理",
+                "Target app/area",
+                value="Email",
+                help="e.g. Email, Order Processing, Invoice Management",
             )
             goal = st.text_area(
-                "何がしたい？（目的）",
-                placeholder="例: 添付の写真から文字抽出して、処理フローに組み込みたい",
+                "Goal",
+                placeholder="e.g. Extract text from attached photos and plug into the pipeline",
                 height=100,
             )
             scope = st.text_area(
-                "想定シナリオ/制約",
-                placeholder="例: まずは単体で出来栄えを見たい。機密情報あり。",
+                "Scenario/constraints",
+                placeholder="e.g. Start with a standalone quality check. Contains sensitive data.",
                 height=100,
             )
             success = st.text_area(
-                "成功条件/評価基準",
-                placeholder="例: 95%の抽出精度、3秒以内の処理",
+                "Success criteria",
+                placeholder="e.g. 95% extraction accuracy within 3 seconds",
                 height=80,
             )
         with col_b:
-            st.markdown("<div class='psb-label'>進め方</div>", unsafe_allow_html=True)
+            st.markdown("<div class='psb-label'>Approach</div>", unsafe_allow_html=True)
             path = st.radio(
-                "どの形で検証する？",
-                ["まずは単体の出来栄えを見る", "ワークフローに組み込みたい"],
+                "How do you want to validate?",
+                ["Start with a standalone result", "Integrate into a workflow"],
             )
             customization = st.radio(
-                "ユーザーが自分でやってよい範囲",
-                ["簡単な開発/カスタムはユーザーに任せる", "基本は運用チームで対応"],
+                "Who handles changes?",
+                ["User handles light dev/customization", "Ops team handles most changes"],
             )
-            st.markdown("<div class='psb-label' style='margin-top:12px'>任意情報</div>", unsafe_allow_html=True)
+            st.markdown("<div class='psb-label' style='margin-top:12px'>Optional Info</div>", unsafe_allow_html=True)
             artifacts = st.text_area(
-                "参考情報（任意）",
-                placeholder="例: 既存ルール、ログ、サンプル画像の説明",
+                "Reference info (optional)",
+                placeholder="e.g. Existing rules, logs, sample image descriptions",
                 height=120,
             )
 
         col_c, col_d = st.columns([1, 1])
         with col_c:
-            if st.button("受付内容を保存"):
+            if st.button("Save Intake"):
                 st.session_state["quality_intake"] = {
                     "app_context": app_context,
                     "goal": goal,
@@ -751,9 +901,9 @@ with tabs[3]:
                     "customization": customization,
                     "artifacts": artifacts,
                 }
-                st.success("受付内容を保存しました。")
+                st.success("Intake saved.")
         with col_d:
-            if st.button("Intent Spec 生成 (AI)"):
+            if st.button("Generate Intent Spec (AI)"):
                 spec, error, source = generate_intent_spec(
                     app_context=app_context,
                     goal=goal,
@@ -780,7 +930,7 @@ with tabs[3]:
                 else:
                     st.success("Intent Spec generated by AI.")
 
-        if st.button("Intent Spec 生成 (Template)"):
+        if st.button("Generate Intent Spec (Template)"):
             spec, error, source = generate_intent_spec(
                 app_context=app_context,
                 goal=goal,
@@ -863,16 +1013,16 @@ with tabs[3]:
                 if not proposals:
                     st.warning("No rule proposals generated from Intent Spec.")
                 else:
-                    merged, summary = append_unique_rules(
+                    merged, merge_summary = append_unique_rules(
                         st.session_state.get("proposed_rules") or [],
                         proposals,
                     )
                     st.session_state["proposed_rules"] = merged
                     save_rules(PROPOSED_RULES_PATH, merged)
                     st.success(
-                        f"Added {summary['added']} proposed rules "
-                        f"(skipped duplicates {summary['skipped_duplicates']}, "
-                        f"invalid {summary['skipped_invalid']})."
+                        f"Added {merge_summary['added']} proposed rules "
+                        f"(skipped duplicates {merge_summary['skipped_duplicates']}, "
+                        f"invalid {merge_summary['skipped_invalid']})."
                     )
                     st.rerun()
 
@@ -891,9 +1041,9 @@ with tabs[3]:
     if st.session_state.get("quality_intake"):
         st.json(st.session_state["quality_intake"])
 
-with tabs[4]:
-    jobs = st.session_state.setdefault("jobs", {})
-    st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
+    st.write("")
+    st.markdown("<div class='psb-label'>Pipeline D: Run / Validate</div>", unsafe_allow_html=True)
+    st.write("Compile configuration and start a run. Review results in the summary tab.")
     st.markdown(
         "<div class='psb-card'>"
         "<div class='psb-label'>Config</div>"
@@ -906,6 +1056,7 @@ with tabs[4]:
 
     st.write("")
     run_col_a, run_col_b = st.columns([1, 1])
+    jobs = st.session_state["jobs"]
     with run_col_a:
         if st.button("Compile Specs Only"):
             compile_summary = run_bridge_compile_summary(
@@ -949,9 +1100,6 @@ with tabs[4]:
             jobs[job_id]["log_start_index"] = baseline_count
             st.session_state["last_job_id"] = job_id
 
-    if st.button("Refresh Results"):
-        st.rerun()
-
     st.write("")
     current_spec = st.session_state.get("intent_spec") or {}
     if current_spec.get("spec_id"):
@@ -961,141 +1109,3 @@ with tabs[4]:
         )
     else:
         st.caption("Current spec: not generated yet")
-
-    compile_summary = st.session_state.get("compile_summary")
-    if compile_summary:
-        st.markdown("<div class='psb-label'>Last Compile Summary</div>", unsafe_allow_html=True)
-        st.caption(
-            f"status: {compile_summary.get('status')} | "
-            f"started_at: {compile_summary.get('started_at')} | "
-            f"ended_at: {compile_summary.get('ended_at')}"
-        )
-        st.dataframe(compile_summary.get("artifacts", []), use_container_width=True)
-        if compile_summary.get("error"):
-            st.warning(f"Compile error: {compile_summary.get('error')}")
-
-    # Always show global log view so notebook-triggered runs are visible in Web.
-    summary_col, detail_col = st.columns([1, 1])
-    with summary_col:
-        tail_limit = st.number_input("Global log lines (tail)", min_value=50, max_value=2000, value=300, step=50)
-    with detail_col:
-        show_global_detail = st.checkbox("Show global detail table", value=False)
-
-    log_mtime = _log_mtime(LOGS_PATH)
-    start = time.perf_counter()
-    all_runs = load_runs_tail_cached(str(LOGS_PATH), log_mtime, max_lines=int(tail_limit))
-    _record_perf("run.load_runs_tail", time.perf_counter() - start, len(all_runs))
-    global_summary = summarize_run_window(all_runs, start_index=0)
-    st.markdown("<div class='psb-label'>Global Run Summary (Jupyter + Web)</div>", unsafe_allow_html=True)
-    g1, g2, g3, g4 = st.columns(4)
-    with g1:
-        st.metric("Processed", global_summary["total"])
-    with g2:
-        st.metric("Success", global_summary["success"])
-    with g3:
-        st.metric("Error", global_summary["error"])
-    with g4:
-        st.metric("Artifacts", global_summary["with_output"])
-    if global_summary["workflows"]:
-        st.caption(f"Workflows: {', '.join(global_summary['workflows'])}")
-    if global_summary["latest_timestamp"]:
-        st.caption(f"Latest log time: {global_summary['latest_timestamp']}")
-    if global_summary["latest_error"]:
-        st.warning(f"Latest error: {global_summary['latest_error']}")
-
-    if show_global_detail:
-        st.markdown("<div class='psb-label'>Global Run Detail</div>", unsafe_allow_html=True)
-        global_detail_rows = summarize_run_detail_rows(
-            all_runs,
-            start_index=0,
-            limit=100,
-        )
-        if global_detail_rows:
-            st.dataframe(global_detail_rows, use_container_width=True)
-        else:
-            st.info("No logs found yet.")
-
-    last_job_id = st.session_state.get("last_job_id")
-    if last_job_id and last_job_id in jobs:
-        log_mtime = _log_mtime(LOGS_PATH)
-        start = time.perf_counter()
-        current_runs = load_runs_cached(str(LOGS_PATH), log_mtime)
-        _record_perf("run.load_runs_full", time.perf_counter() - start, len(current_runs))
-        last_job = jobs[last_job_id]
-        duration_sec = compute_job_duration_seconds(last_job)
-        st.markdown("<div class='psb-label'>Last Triggered Job Summary (Web only)</div>", unsafe_allow_html=True)
-        summary = summarize_run_window(
-            current_runs,
-            start_index=int(last_job.get("log_start_index", 0)),
-        )
-        s1, s2, s3, s4 = st.columns(4)
-        with s1:
-            st.metric("Processed", summary["total"])
-        with s2:
-            st.metric("Success", summary["success"])
-        with s3:
-            st.metric("Error", summary["error"])
-        with s4:
-            st.metric("Artifacts", summary["with_output"])
-        if summary["workflows"]:
-            st.caption(f"Workflows: {', '.join(summary['workflows'])}")
-        if summary["latest_timestamp"]:
-            st.caption(f"Latest log time: {summary['latest_timestamp']}")
-        if summary["latest_error"]:
-            st.warning(f"Latest error: {summary['latest_error']}")
-
-        st.markdown("<div class='psb-label'>Last Triggered Job Detail (Web only)</div>", unsafe_allow_html=True)
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            st.caption(f"job_id: {last_job_id}")
-        with c2:
-            st.caption(f"status: {last_job.get('status', '-')}")
-        with c3:
-            st.caption(f"started_at: {last_job.get('started_at', '-')}")
-        with c4:
-            st.caption(f"ended_at: {last_job.get('ended_at', '-')}")
-        with c5:
-            st.caption(f"duration_sec: {duration_sec if duration_sec is not None else '-'}")
-
-        detail_rows = summarize_run_detail_rows(
-            current_runs,
-            start_index=int(last_job.get("log_start_index", 0)),
-            limit=100,
-        )
-        if detail_rows:
-            st.dataframe(detail_rows, use_container_width=True)
-        else:
-            st.info("No detailed logs found for this run window yet.")
-
-        pipeline_summary = last_job.get("pipeline_summary")
-        if pipeline_summary:
-            st.markdown("<div class='psb-label'>Notebook Baseline Summary</div>", unsafe_allow_html=True)
-            st.caption(
-                f"status: {pipeline_summary.get('status')} | "
-                f"started_at: {pipeline_summary.get('started_at')} | "
-                f"ended_at: {pipeline_summary.get('ended_at')}"
-            )
-            st.dataframe(pipeline_summary.get("artifacts", []), use_container_width=True)
-            if pipeline_summary.get("error"):
-                st.warning(f"Pipeline error: {pipeline_summary.get('error')}")
-
-    st.markdown("<div class='psb-label'>Job Status</div>", unsafe_allow_html=True)
-    if not jobs:
-        st.info("No jobs yet.")
-    else:
-        for job_id, info in list(jobs.items())[::-1]:
-            spec_label = info.get("spec_id", "-")
-            st.write(f"{job_id} | spec: {spec_label} | status: {info['status']}")
-
-    with st.expander("Performance (Debug)", expanded=False):
-        st.session_state["perf_debug"] = st.checkbox("Show timings", value=st.session_state.get("perf_debug", False))
-        if st.session_state.get("perf_debug"):
-            marks = st.session_state.get("perf_marks") or []
-            if marks:
-                rows = [
-                    {"label": label, "seconds": round(seconds, 4), "items": count}
-                    for label, seconds, count in marks[-20:]
-                ]
-                st.dataframe(rows, use_container_width=True)
-            else:
-                st.info("No timings captured yet.")

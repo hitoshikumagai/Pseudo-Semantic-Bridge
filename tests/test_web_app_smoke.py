@@ -274,7 +274,7 @@ def test_web_app_import_smoke(monkeypatch):
     assert any(call[0] == "tabs" for call in fake_st.calls)
     tab_calls = [call for call in fake_st.calls if call[0] == "tabs"]
     assert tab_calls
-    assert "Design: Semantic Layer" in tab_calls[0][1]
+    assert "5) Semantic Layer Hub" in tab_calls[0][1]
 
 
 def test_web_app_run_pipeline_smoke(monkeypatch):

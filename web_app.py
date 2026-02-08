@@ -490,12 +490,12 @@ st.write("")
 
 tabs = st.tabs(
     [
-        "Overview",
-        "Rules",
-        "Design: Rule Builder",
-        "Design: Intent Spec",
-        "Design: Semantic Layer",
-        "Run",
+        "1) Semantic Overview",
+        "2) Semantic Input: Rules",
+        "3) Semantic Input: Candidates",
+        "4) Semantic Input: Intent",
+        "5) Semantic Layer Hub",
+        "6) Run Automation",
     ]
 )
 
@@ -561,6 +561,7 @@ st.session_state["semantic_layer_spec"] = _collect_semantic_payload_from_state(
 )
 
 with tabs[0]:
+    st.caption("Workflow: Semantic Inputs -> Semantic Layer Hub -> Run Automation")
     log_mtime = _log_mtime(LOGS_PATH)
     start = time.perf_counter()
     runs = load_runs_cached(str(LOGS_PATH), log_mtime)
@@ -603,8 +604,8 @@ with tabs[0]:
     )
 
 with tabs[1]:
-    st.markdown("<div class='psb-label'>Business Rules</div>", unsafe_allow_html=True)
-    st.caption("This tab contributes rule assets into the semantic layer definition.")
+    st.markdown("<div class='psb-label'>Semantic Input / Rule Assets</div>", unsafe_allow_html=True)
+    st.caption("Writes into semantic path: automation_assets.rules / automation_assets.proposed_rules")
     edited = st.data_editor(
         st.session_state["rules"],
         num_rows="dynamic",
@@ -689,8 +690,8 @@ with tabs[1]:
                 st.rerun()
 
 with tabs[2]:
-    st.markdown("<div class='psb-label'>Design / Rule Builder</div>", unsafe_allow_html=True)
-    st.caption("Candidate outputs from this tab are aggregated into semantic-layer automation assets.")
+    st.markdown("<div class='psb-label'>Semantic Input / Candidate Mining</div>", unsafe_allow_html=True)
+    st.caption("Writes into semantic path: automation_assets.candidate_meta / automation_assets.candidate_rows")
     st.write("実行ログからルール候補を生成し、Rulesへ反映するための設計タブです。")
     st.caption("Output: executable rule rows (subject_filter, action_id, etc.)")
 
@@ -842,8 +843,8 @@ with tabs[2]:
         render_skeleton_card("Candidate Rows Table", [92, 66, 82, 54])
 
 with tabs[3]:
-    st.markdown("<div class='psb-label'>Design / Intent Specification</div>", unsafe_allow_html=True)
-    st.caption("Intent design in this tab is treated as semantic-layer context for final automation run.")
+    st.markdown("<div class='psb-label'>Semantic Input / Intent Specification</div>", unsafe_allow_html=True)
+    st.caption("Writes into semantic path: automation_assets.intent_spec / automation_assets.intent_spec_source")
     st.write("曖昧な要求を Intent Spec (IR) に定式化し、Run へ渡すための設計タブです。")
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
@@ -1166,10 +1167,10 @@ with tabs[3]:
         st.json(st.session_state["quality_intake"])
 
 with tabs[4]:
-    st.markdown("<div class='psb-label'>Design / Semantic Layer</div>", unsafe_allow_html=True)
+    st.markdown("<div class='psb-label'>Semantic Layer Hub</div>", unsafe_allow_html=True)
     st.write(
-        "Build the semantic layer in six steps so business meaning, lineage, ownership, "
-        "and active metadata are captured in one portable spec."
+        "Central hub. This consolidates all semantic inputs with business meaning, lineage, ownership, "
+        "and active metadata into one portable spec."
     )
     st.caption(f"Output path: {SEMANTIC_LAYER_PATH}")
 
@@ -1401,7 +1402,7 @@ with tabs[4]:
 
 with tabs[5]:
     jobs = st.session_state.setdefault("jobs", {})
-    st.markdown("<div class='psb-label'>Run</div>", unsafe_allow_html=True)
+    st.markdown("<div class='psb-label'>Run Automation</div>", unsafe_allow_html=True)
     st.caption("Run uses the semantic-layer aggregated assets as the final automation input.")
     st.markdown(
         "<div class='psb-card'>"

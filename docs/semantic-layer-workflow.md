@@ -17,6 +17,23 @@ Each design tab contributes inputs into one aggregated semantic payload, and the
 - AI generates draft rules and sends them to proposed rules queue.
 - Human reviews proposed rules (`select + merge`) before active rules are updated.
 
+## Existing Rule / IR Maintenance
+- `Semantic Layer Hub` provides a `Rule / IR Relationship Map` for active and proposed rules.
+- `IR Coverage` shows whether each historical IR has active/proposed rule coverage.
+- Maintenance actions:
+- `Remove Selected Unlinked Proposed`
+- `Queue Missing IR Rules To Proposed`
+
+## Table and Diagram Views
+- Hub supports `table` mode (node/edge tables) for systems-style review.
+- Hub supports `mermaid` mode for editable flow representation.
+- AI can draft Mermaid flow from natural language prompt; users can manually edit and keep iterating.
+
+## AI Help Buttons
+- Candidate tab: `AI Help: Improve Rule Instruction`.
+- Intent tab: `AI Help: Suggest Intent Structure`.
+- Both are lightweight assist actions intended to unblock first drafts.
+
 ## Data Model
 Semantic layer file:
 - `configs/accounting/semantic_layer_definition.json`

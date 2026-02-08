@@ -103,6 +103,12 @@
     "candidate_rows": [],
     "instruction_intake": null,
     "intent_spec": null,
-    "intent_spec_source": null
+    "intent_spec_source": null,
+    "intent_spec_history": []
+  },
+  "architecture_views": {
+    "diagram_mode": "table",
+    "mermaid_flow": "",
+    "last_ai_prompt": ""
   }
 }

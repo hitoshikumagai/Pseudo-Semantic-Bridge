@@ -369,3 +369,97 @@ def test_web_app_ai_rule_draft_added_to_review_queue(monkeypatch):
     proposed = fake_st.session_state.get("proposed_rules") or []
     assert proposed
     assert proposed[0]["task_name"] in {"AUTO_DRAFT", "AUTO"}
+
+
+def test_rule_ir_relationship_rows_helper(monkeypatch):
+    module, _fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
+    active_rules = [
+        {
+            "subject_filter": "Invoice",
+            "task_name": "INVOICE",
+            "require_attachment": True,
+            "target_ext": ".pdf",
+            "action_id": "ocr_process",
+        }
+    ]
+    proposed_rules = [
+        {
+            "subject_filter": "Report",
+            "task_name": "REPORT",
+            "require_attachment": False,
+            "target_ext": "",
+            "action_id": "save_process",
+        }
+    ]
+    intent_history = [
+        {
+            "spec_id": "spec-1",
+            "rule": {
+                "subject_filter": "Invoice",
+                "require_attachment": True,
+                "target_ext": ".pdf",
+                "action_id": "ocr_process",
+            },
+        }
+    ]
+    rows = module._build_rule_ir_relationship_rows(active_rules, proposed_rules, intent_history)
+    linked = [row for row in rows if row["status"] == "linked"]
+    assert linked
+    assert linked[0]["linked_ir_count"] == 1
+
+
+def test_queue_missing_ir_rules_helper(monkeypatch):
+    module, _fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
+    existing_rules = []
+    proposed_rules = []
+    intent_history = [
+        {
+            "spec_id": "spec-2",
+            "captured_at": "2026-02-08T00:00:00Z",
+            "rule": {
+                "subject_filter": "Invoice",
+                "task_name": "INVOICE",
+                "require_attachment": True,
+                "target_ext": ".pdf",
+                "action_id": "ocr_process",
+                "parameters": {},
+            },
+        }
+    ]
+    merged, summary = module._queue_missing_ir_rules(intent_history, existing_rules, proposed_rules)
+    assert summary["added"] == 1
+    assert merged
+    assert merged[0]["rule_source"]["kind"] == "intent_history"
+
+
+def test_semantic_mermaid_from_spec_helper(monkeypatch):
+    module, _fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
+    semantic_spec = {
+        "automation_assets": {
+            "rules": [{"subject_filter": "Invoice", "action_id": "ocr_process", "require_attachment": True}],
+            "proposed_rules": [],
+            "candidate_rows": [],
+            "intent_spec": {"spec_id": "spec-mermaid"},
+        }
+    }
+    mermaid_text = module._semantic_mermaid_from_spec(semantic_spec)
+    assert "flowchart TD" in mermaid_text
+    assert "Run Automation" in mermaid_text
+
+
+def test_candidate_ai_help_button_sets_message(monkeypatch):
+    _module, fake_st, _tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"AI Help: Improve Rule Instruction"},
+        initial_session_state={"candidate_user_instruction": "Need OCR priority for invoices"},
+    )
+    assert fake_st.session_state.get("candidate_help_message")
+
+
+def test_intent_ai_help_button_sets_message(monkeypatch):
+    _module, fake_st, _tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"AI Help: Suggest Intent Structure"},
+        initial_session_state={"intent_help_seed": "Need approval-aware flow"},
+    )
+    assert fake_st.session_state.get("intent_help_message")

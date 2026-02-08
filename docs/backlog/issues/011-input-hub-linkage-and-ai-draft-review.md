@@ -26,3 +26,5 @@ Make each input tab explicitly show how user actions populate semantic hub field
 - Added AI draft rule generation from human instruction with review queue insertion.
 - Kept review-first merge flow (`Proposed Rules`) as the only path to active rules.
 - Updated workflow docs to describe AI draft + human review loop.
+- Added detailed rule/IR relationship and coverage tables in semantic hub.
+- Added maintenance actions for unlinked proposed rules and missing IR-derived rules.

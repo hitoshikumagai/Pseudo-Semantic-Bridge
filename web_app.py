@@ -269,6 +269,12 @@ def _default_semantic_layer_spec() -> dict:
             "instruction_intake": None,
             "intent_spec": None,
             "intent_spec_source": None,
+            "intent_spec_history": [],
+        },
+        "architecture_views": {
+            "diagram_mode": "table",
+            "mermaid_flow": "",
+            "last_ai_prompt": "",
         },
     }
 
@@ -403,6 +409,7 @@ def _load_working_state_from_semantic(spec: dict) -> None:
     semantic_instruction = assets.get("instruction_intake")
     semantic_intent_spec = assets.get("intent_spec")
     semantic_intent_source = assets.get("intent_spec_source")
+    semantic_intent_history = _normalize_dict_rows(assets.get("intent_spec_history"))
 
     if semantic_rules:
         st.session_state["rules"] = semantic_rules
@@ -418,10 +425,19 @@ def _load_working_state_from_semantic(spec: dict) -> None:
         st.session_state["intent_spec"] = semantic_intent_spec
     if isinstance(semantic_intent_source, str):
         st.session_state["intent_spec_source"] = semantic_intent_source
+    if semantic_intent_history:
+        st.session_state["intent_spec_history"] = semantic_intent_history
+    elif isinstance(semantic_intent_spec, dict):
+        _upsert_intent_history(semantic_intent_spec, semantic_intent_source if isinstance(semantic_intent_source, str) else None)
 
 
 def _collect_semantic_payload_from_state(base_spec: dict) -> dict:
     merged = _merge_semantic_spec(_default_semantic_layer_spec(), base_spec if isinstance(base_spec, dict) else {})
+    architecture_views = merged.get("architecture_views") if isinstance(merged.get("architecture_views"), dict) else {}
+    architecture_views["diagram_mode"] = st.session_state.get("diagram_mode") or architecture_views.get("diagram_mode") or "table"
+    architecture_views["mermaid_flow"] = st.session_state.get("mermaid_flow") or architecture_views.get("mermaid_flow") or ""
+    architecture_views["last_ai_prompt"] = st.session_state.get("mermaid_ai_prompt") or architecture_views.get("last_ai_prompt") or ""
+    merged["architecture_views"] = architecture_views
     merged["automation_assets"] = {
         "rules": _normalize_dict_rows(st.session_state.get("rules")),
         "proposed_rules": _normalize_dict_rows(st.session_state.get("proposed_rules")),
@@ -432,6 +448,7 @@ def _collect_semantic_payload_from_state(base_spec: dict) -> dict:
         else None,
         "intent_spec": st.session_state.get("intent_spec") if isinstance(st.session_state.get("intent_spec"), dict) else None,
         "intent_spec_source": st.session_state.get("intent_spec_source"),
+        "intent_spec_history": _normalize_dict_rows(st.session_state.get("intent_spec_history")),
     }
     return merged
 
@@ -476,6 +493,7 @@ def _semantic_source_rows(spec: dict) -> list[dict]:
     proposed_rules = _normalize_dict_rows(assets.get("proposed_rules"))
     candidate_rows = _normalize_dict_rows(assets.get("candidate_rows"))
     intent_spec = assets.get("intent_spec")
+    intent_history = _normalize_dict_rows(assets.get("intent_spec_history"))
     return [
         {
             "path": "purpose.objective_statement",
@@ -508,6 +526,11 @@ def _semantic_source_rows(spec: dict) -> list[dict]:
             if isinstance(intent_spec, dict) and str(intent_spec.get("spec_id") or "").strip()
             else "missing",
             "value": intent_spec.get("spec_id") if isinstance(intent_spec, dict) else "",
+        },
+        {
+            "path": "automation_assets.intent_spec_history",
+            "status": "ready" if intent_history else "missing",
+            "value": len(intent_history),
         },
     ]
 
@@ -563,6 +586,200 @@ def _fallback_rule_drafts_from_text(text: str) -> list[dict]:
             "rule_source": {"kind": "ai_draft", "confidence": 0.5},
         }
     ]
+
+
+def _rule_signature(rule: dict) -> tuple[str, str, bool, str]:
+    if not isinstance(rule, dict):
+        return ("", "", False, "")
+    target_ext = str(rule.get("target_ext") or rule.get("ext") or "")
+    return (
+        str(rule.get("subject_filter") or ""),
+        str(rule.get("action_id") or ""),
+        bool(rule.get("require_attachment")),
+        target_ext,
+    )
+
+
+def _intent_rule_from_spec(spec: dict) -> dict | None:
+    if not isinstance(spec, dict):
+        return None
+    inputs = spec.get("inputs")
+    if not isinstance(inputs, dict):
+        return None
+    mail_rule = inputs.get("mail_rule")
+    if not isinstance(mail_rule, dict):
+        return None
+    subject_filter = str(mail_rule.get("subject_filter") or "").strip()
+    action_id = str(mail_rule.get("action_id") or "").strip()
+    if not subject_filter or not action_id:
+        return None
+    return {
+        "subject_filter": subject_filter,
+        "action_id": action_id,
+        "require_attachment": bool(mail_rule.get("require_attachment")),
+        "target_ext": str(mail_rule.get("target_ext") or ""),
+        "task_name": str(mail_rule.get("task_name") or "AUTO"),
+        "parameters": mail_rule.get("parameters") if isinstance(mail_rule.get("parameters"), dict) else {},
+    }
+
+
+def _upsert_intent_history(spec: dict, source: str | None) -> None:
+    if not isinstance(spec, dict):
+        return
+    spec_id = str(spec.get("spec_id") or "").strip()
+    if not spec_id:
+        return
+    history = _normalize_dict_rows(st.session_state.get("intent_spec_history"))
+    new_entry = {
+        "spec_id": spec_id,
+        "source": source or "unknown",
+        "captured_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "domain": str(spec.get("domain") or ""),
+        "intent": str(spec.get("intent") or ""),
+        "rule": _intent_rule_from_spec(spec),
+    }
+    filtered = [entry for entry in history if str(entry.get("spec_id") or "") != spec_id]
+    filtered.insert(0, new_entry)
+    st.session_state["intent_spec_history"] = filtered[:30]
+
+
+def _build_rule_ir_relationship_rows(
+    active_rules: list[dict],
+    proposed_rules: list[dict],
+    intent_history: list[dict],
+) -> list[dict]:
+    intent_rule_map = {}
+    for entry in _normalize_dict_rows(intent_history):
+        rule = entry.get("rule")
+        if not isinstance(rule, dict):
+            continue
+        signature = _rule_signature(rule)
+        intent_rule_map.setdefault(signature, []).append(str(entry.get("spec_id") or ""))
+
+    rows = []
+    for source_label, rules in [("active_rule", active_rules), ("proposed_rule", proposed_rules)]:
+        for index, rule in enumerate(_normalize_dict_rows(rules)):
+            signature = _rule_signature(rule)
+            linked_specs = intent_rule_map.get(signature, [])
+            rows.append(
+                {
+                    "source": source_label,
+                    "index": index,
+                    "subject_filter": rule.get("subject_filter"),
+                    "action_id": rule.get("action_id"),
+                    "task_name": rule.get("task_name"),
+                    "linked_ir_count": len(linked_specs),
+                    "linked_ir_ids": ", ".join(linked_specs),
+                    "status": "linked" if linked_specs else "unlinked",
+                }
+            )
+    return rows
+
+
+def _build_ir_coverage_rows(intent_history: list[dict], active_rules: list[dict], proposed_rules: list[dict]) -> list[dict]:
+    active_signatures = {_rule_signature(rule) for rule in _normalize_dict_rows(active_rules)}
+    proposed_signatures = {_rule_signature(rule) for rule in _normalize_dict_rows(proposed_rules)}
+    rows = []
+    for entry in _normalize_dict_rows(intent_history):
+        rule = entry.get("rule")
+        if not isinstance(rule, dict):
+            continue
+        signature = _rule_signature(rule)
+        in_active = signature in active_signatures
+        in_proposed = signature in proposed_signatures
+        rows.append(
+            {
+                "spec_id": entry.get("spec_id"),
+                "source": entry.get("source"),
+                "subject_filter": rule.get("subject_filter"),
+                "action_id": rule.get("action_id"),
+                "active_rule": in_active,
+                "proposed_rule": in_proposed,
+                "coverage": "active" if in_active else ("proposed" if in_proposed else "missing"),
+            }
+        )
+    return rows
+
+
+def _queue_missing_ir_rules(intent_history: list[dict], existing_rules: list[dict], proposed_rules: list[dict]) -> tuple[list[dict], dict]:
+    existing_signatures = {_rule_signature(rule) for rule in _normalize_dict_rows(existing_rules)}
+    proposed_signatures = {_rule_signature(rule) for rule in _normalize_dict_rows(proposed_rules)}
+    candidates = []
+    for entry in _normalize_dict_rows(intent_history):
+        rule = entry.get("rule")
+        if not isinstance(rule, dict):
+            continue
+        signature = _rule_signature(rule)
+        if signature in existing_signatures or signature in proposed_signatures:
+            continue
+        candidate = dict(rule)
+        candidate["rule_source"] = {
+            "kind": "intent_history",
+            "spec_id": entry.get("spec_id"),
+            "captured_at": entry.get("captured_at"),
+        }
+        candidates.append(candidate)
+    return append_unique_rules(proposed_rules, candidates)
+
+
+def _build_hub_node_rows(spec: dict) -> list[dict]:
+    assets = _get_semantic_assets(spec)
+    intent_spec = assets.get("intent_spec") if isinstance(assets.get("intent_spec"), dict) else {}
+    return [
+        {"node": "rules", "count": len(_normalize_dict_rows(assets.get("rules"))), "status": "ready" if _normalize_dict_rows(assets.get("rules")) else "missing"},
+        {"node": "proposed_rules", "count": len(_normalize_dict_rows(assets.get("proposed_rules"))), "status": "ready" if _normalize_dict_rows(assets.get("proposed_rules")) else "missing"},
+        {"node": "candidate_rows", "count": len(_normalize_dict_rows(assets.get("candidate_rows"))), "status": "ready" if _normalize_dict_rows(assets.get("candidate_rows")) else "missing"},
+        {"node": "intent_spec", "count": 1 if intent_spec else 0, "status": "ready" if intent_spec else "missing"},
+        {"node": "intent_history", "count": len(_normalize_dict_rows(assets.get("intent_spec_history"))), "status": "ready" if _normalize_dict_rows(assets.get("intent_spec_history")) else "missing"},
+        {"node": "run_gateway", "count": 1, "status": "ready"},
+    ]
+
+
+def _build_hub_edge_rows(spec: dict) -> list[dict]:
+    assets = _get_semantic_assets(spec)
+    return [
+        {"from": "input_rules", "to": "automation_assets.rules", "status": "ready" if _normalize_dict_rows(assets.get("rules")) else "missing"},
+        {"from": "input_candidates", "to": "automation_assets.candidate_rows", "status": "ready" if _normalize_dict_rows(assets.get("candidate_rows")) else "missing"},
+        {"from": "input_intent", "to": "automation_assets.intent_spec", "status": "ready" if isinstance(assets.get("intent_spec"), dict) else "missing"},
+        {"from": "automation_assets.rules", "to": "run_automation", "status": "ready" if _normalize_dict_rows(assets.get("rules")) else "blocked"},
+        {"from": "automation_assets.intent_spec", "to": "run_automation", "status": "ready" if isinstance(assets.get("intent_spec"), dict) else "blocked"},
+    ]
+
+
+def _semantic_mermaid_from_spec(spec: dict) -> str:
+    assets = _get_semantic_assets(spec)
+    rules_count = len(_normalize_dict_rows(assets.get("rules")))
+    proposed_count = len(_normalize_dict_rows(assets.get("proposed_rules")))
+    candidate_count = len(_normalize_dict_rows(assets.get("candidate_rows")))
+    intent_spec = assets.get("intent_spec") if isinstance(assets.get("intent_spec"), dict) else {}
+    intent_id = str(intent_spec.get("spec_id") or "missing")
+    return "\n".join(
+        [
+            "flowchart TD",
+            '  IRules["Input: Rules"] --> HubRules["Hub rules (' + str(rules_count) + ')"]',
+            '  ICand["Input: Candidates"] --> HubCand["Hub candidates (' + str(candidate_count) + ')"]',
+            '  IIntent["Input: Intent"] --> HubIntent["Hub intent (' + intent_id + ')"]',
+            '  HubCand --> HubProposed["Hub proposed (' + str(proposed_count) + ')"]',
+            '  HubRules --> Run["Run Automation"]',
+            '  HubIntent --> Run',
+        ]
+    )
+
+
+def _semantic_mermaid_from_intent_steps(spec: dict) -> str:
+    if not isinstance(spec, dict):
+        return ""
+    steps = spec.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return ""
+    lines = ["flowchart TD", '  Start["AI Prompt"] --> S0["Intent Spec"]']
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            continue
+        label = str(step.get("action") or step.get("id") or f"step_{index + 1}")
+        lines.append(f'  S{index} --> S{index + 1}["{label}"]')
+    lines.append(f'  S{len(steps)} --> End["Hub Draft"]')
+    return "\n".join(lines)
 
 
 def render_kpi(label: str, value: str):
@@ -648,6 +865,8 @@ if "intent_spec_source" not in st.session_state:
 
 if "intent_spec_error" not in st.session_state:
     st.session_state["intent_spec_error"] = None
+if "intent_spec_history" not in st.session_state:
+    st.session_state["intent_spec_history"] = []
 
 if "instruction_intake" not in st.session_state:
     st.session_state["instruction_intake"] = None
@@ -656,6 +875,26 @@ if "compile_summary" not in st.session_state:
     st.session_state["compile_summary"] = None
 if "semantic_layer_spec" not in st.session_state:
     st.session_state["semantic_layer_spec"] = _load_semantic_layer_spec(SEMANTIC_LAYER_PATH)
+architecture_views_init = st.session_state.get("semantic_layer_spec", {}).get("architecture_views")
+if "diagram_mode" not in st.session_state:
+    if isinstance(architecture_views_init, dict):
+        st.session_state["diagram_mode"] = architecture_views_init.get("diagram_mode", "table")
+    else:
+        st.session_state["diagram_mode"] = "table"
+if "mermaid_flow" not in st.session_state:
+    if isinstance(architecture_views_init, dict):
+        st.session_state["mermaid_flow"] = architecture_views_init.get("mermaid_flow", "")
+    else:
+        st.session_state["mermaid_flow"] = ""
+if "mermaid_ai_prompt" not in st.session_state:
+    if isinstance(architecture_views_init, dict):
+        st.session_state["mermaid_ai_prompt"] = architecture_views_init.get("last_ai_prompt", "")
+    else:
+        st.session_state["mermaid_ai_prompt"] = ""
+if "intent_help_message" not in st.session_state:
+    st.session_state["intent_help_message"] = ""
+if "candidate_help_message" not in st.session_state:
+    st.session_state["candidate_help_message"] = ""
 if "conversation_log" not in st.session_state:
     st.session_state["conversation_log"] = []
 if "conversation_rounds" not in st.session_state:
@@ -872,8 +1111,9 @@ with tabs[2]:
 
     user_instruction = st.text_area(
         "User instruction",
-        placeholder="例: 請求書はOCRを優先。日報は保存のみ。",
+        placeholder="e.g. Prioritize OCR for invoices; store daily reports without OCR.",
         height=80,
+        key="candidate_user_instruction",
     )
     col_i1, col_i2 = st.columns([1, 1])
     with col_i1:
@@ -881,9 +1121,40 @@ with tabs[2]:
     with col_i2:
         instruction_model = st.text_input("Instruction model", value="gpt-4o-mini")
 
+    help_col_a, help_col_b = st.columns([1, 1])
+    with help_col_a:
+        if st.button("AI Help: Improve Rule Instruction"):
+            help_seed = (user_instruction or "").strip()
+            if not help_seed:
+                help_seed = "I want to automate invoice processing with clear review steps."
+            analyzed, help_error, help_source = analyze_and_log_user_instruction(
+                user_instruction=help_seed,
+                log_path=INTAKE_LOGS_PATH,
+                domain_hint=domain_hint,
+                use_ai=True,
+                model=instruction_model,
+            )
+            if isinstance(analyzed, dict):
+                tasks = analyzed.get("tasks") if isinstance(analyzed.get("tasks"), list) else []
+                constraints = analyzed.get("constraints") if isinstance(analyzed.get("constraints"), list) else []
+                task_text = ", ".join([str(item) for item in tasks[:3]]) if tasks else "(none)"
+                constraint_text = ", ".join([str(item) for item in constraints[:3]]) if constraints else "(none)"
+                st.session_state["candidate_help_message"] = (
+                    f"AI help ({help_source}): tasks={task_text} | constraints={constraint_text}"
+                )
+            if help_error:
+                st.warning(help_error)
+    with help_col_b:
+        if st.button("Use Instruction As Draft Prompt"):
+            st.session_state["rule_draft_prompt_input"] = user_instruction or ""
+            st.success("Copied current instruction into AI draft prompt.")
+
+    if st.session_state.get("candidate_help_message"):
+        st.info(st.session_state["candidate_help_message"])
+
     col_i3, col_i4 = st.columns([1, 1])
     with col_i3:
-        if st.button("Instruction 解析 (AI)"):
+        if st.button("Analyze Instruction (AI)"):
             analyzed, error, source = analyze_and_log_user_instruction(
                 user_instruction=user_instruction,
                 log_path=INTAKE_LOGS_PATH,
@@ -897,7 +1168,7 @@ with tabs[2]:
             else:
                 st.success("Instruction analyzed by AI and logged.")
     with col_i4:
-        if st.button("Instruction 解析 (Template)"):
+        if st.button("Analyze Instruction (Template)"):
             analyzed, error, source = analyze_and_log_user_instruction(
                 user_instruction=user_instruction,
                 log_path=INTAKE_LOGS_PATH,
@@ -982,6 +1253,7 @@ with tabs[2]:
                 if isinstance(draft_spec, dict):
                     st.session_state["intent_spec"] = draft_spec
                     st.session_state["intent_spec_source"] = draft_source
+                    _upsert_intent_history(draft_spec, draft_source)
                 st.success(
                     "AI draft rules queued for review: "
                     f"added {summary['added']}, "
@@ -1108,8 +1380,38 @@ with tabs[3]:
     st.caption("Output: intent spec JSON (spec_id, steps, verification, fallback)")
 
     llm_model = st.session_state.get("intent_llm_model", "gpt-4o-mini")
+    intent_help_seed = st.text_input(
+        "Intent help seed",
+        value="",
+        placeholder="e.g. I need an approval-aware invoice automation flow.",
+        key="intent_help_seed",
+    )
+    if st.button("AI Help: Suggest Intent Structure"):
+        help_goal = (intent_help_seed or "").strip() or "Design a practical intent spec for invoice automation."
+        help_spec, help_error, help_source = generate_intent_spec(
+            app_context="semantic_hub_intent_help",
+            goal=help_goal,
+            scope="Give minimal but maintainable workflow",
+            success="Intent spec is understandable and reviewable",
+            artifacts="semantic-first automation",
+            use_ai=True,
+            model=llm_model,
+        )
+        if help_error:
+            st.warning(help_error)
+        help_steps = help_spec.get("steps") if isinstance(help_spec, dict) else []
+        step_labels = []
+        if isinstance(help_steps, list):
+            for step in help_steps[:4]:
+                if isinstance(step, dict):
+                    step_labels.append(str(step.get("action") or step.get("id") or "step"))
+        st.session_state["intent_help_message"] = (
+            f"AI help ({help_source}): suggested steps -> {', '.join(step_labels) if step_labels else '(none)'}"
+        )
+    if st.session_state.get("intent_help_message"):
+        st.info(st.session_state["intent_help_message"])
 
-    mail_subject_filter = st.session_state.get("mail_subject_filter", "請求書")
+    mail_subject_filter = st.session_state.get("mail_subject_filter", "invoice")
     mail_task_name = st.session_state.get("mail_task_name", "INVOICE")
     mail_require_attachment = st.session_state.get("mail_require_attachment", True)
     mail_action_id = st.session_state.get("mail_action_id", "ocr_process")
@@ -1128,12 +1430,12 @@ with tabs[3]:
     else:
         st.caption("Conversation log is empty.")
 
-    user_message = st.chat_input("やりたいことを入力してください")
+    user_message = st.chat_input("Describe what you want to automate")
     if user_message:
         st.session_state["conversation_log"].append({"role": "user", "content": user_message})
         allow_more_needed = st.session_state["conversation_rounds"] >= 3 and not st.session_state["conversation_allow_more"]
         if allow_more_needed:
-            st.warning("質問は3回まで。さらに必要なら許可してください。")
+            st.warning("Follow-up questions are limited to 3 rounds. Allow more if needed.")
         else:
             question, error, source = generate_followup_question(
                 conversation=st.session_state["conversation_log"],
@@ -1186,7 +1488,7 @@ with tabs[3]:
             chunks.extend(_split_chunks(bullet))
         chunks = _dedupe_chunks(chunks)
         marked = st.multiselect(
-            "興味のある文字の塊をマーキング",
+            "Mark relevant text chunks",
             chunks,
             default=st.session_state.get("conversation_marked") or [],
         )
@@ -1196,11 +1498,11 @@ with tabs[3]:
                 st.warning("Marked chunks are empty.")
             else:
                 st.session_state["conversation_focus"] = " / ".join(marked)
-        focus_choice = st.selectbox("興味のあるポイントを選択", summary_bullets)
+        focus_choice = st.selectbox("Select the focus point", summary_bullets)
         if st.button("Confirm Focus"):
             st.session_state["conversation_focus"] = focus_choice
 
-    if st.button("Intent Spec 生成 (Conversation)", type="primary"):
+    if st.button("Generate Intent Spec (Conversation)", type="primary"):
         focus = st.session_state.get("conversation_focus")
         if not focus:
             st.warning("Focus is not confirmed yet.")
@@ -1223,6 +1525,7 @@ with tabs[3]:
             spec["inputs"] = spec_inputs
             st.session_state["intent_spec"] = spec
             st.session_state["intent_spec_source"] = source
+            _upsert_intent_history(spec, source)
             st.session_state["intent_spec_error"] = error
             if error:
                 st.warning(error)
@@ -1235,45 +1538,45 @@ with tabs[3]:
         col_a, col_b = st.columns([2, 1])
         with col_a:
             app_context = st.text_input(
-                "対象アプリ/領域",
-                value="メール",
-                help="例: メール, 受発注, 請求書管理",
+                "Target app/domain",
+                value="mail",
+                help="e.g. mail, order processing, invoice management",
             )
             goal = st.text_area(
-                "何がしたい？（目的）",
-                placeholder="例: 添付の写真から文字抽出して、処理フローに組み込みたい",
+                "What do you want to do? (Goal)",
+                placeholder="e.g. Extract text from attached images and add it to the processing flow",
                 height=100,
             )
             scope = st.text_area(
-                "想定シナリオ/制約",
-                placeholder="例: まずは単体で出来栄えを見たい。機密情報あり。",
+                "Expected scenarios / constraints",
+                placeholder="e.g. Start with standalone validation; includes sensitive data",
                 height=100,
             )
             success = st.text_area(
-                "成功条件/評価基準",
-                placeholder="例: 95%の抽出精度、3秒以内の処理",
+                "Success criteria / metrics",
+                placeholder="e.g. 95% extraction accuracy and under 3 seconds processing time",
                 height=80,
             )
         with col_b:
-            st.markdown("<div class='psb-label'>進め方</div>", unsafe_allow_html=True)
+            st.markdown("<div class='psb-label'>Validation Path</div>", unsafe_allow_html=True)
             path = st.radio(
-                "どの形で検証する？",
-                ["まずは単体の出来栄えを見る", "ワークフローに組み込みたい"],
+                "How should we validate?",
+                ["Start with standalone quality checks", "Integrate into workflow"],
             )
             customization = st.radio(
-                "ユーザーが自分でやってよい範囲",
-                ["簡単な開発/カスタムはユーザーに任せる", "基本は運用チームで対応"],
+                "User customization ownership",
+                ["User can handle lightweight development/customization", "Operations team handles most changes"],
             )
-            st.markdown("<div class='psb-label' style='margin-top:12px'>任意情報</div>", unsafe_allow_html=True)
+            st.markdown("<div class='psb-label' style='margin-top:12px'>Optional Info</div>", unsafe_allow_html=True)
             artifacts = st.text_area(
-                "参考情報（任意）",
-                placeholder="例: 既存ルール、ログ、サンプル画像の説明",
+                "Reference information (optional)",
+                placeholder="e.g. existing rules, logs, sample image notes",
                 height=120,
             )
 
         col_c, col_d = st.columns([1, 1])
         with col_c:
-            if st.button("受付内容を保存"):
+            if st.button("Save Intake"):
                 st.session_state["quality_intake"] = {
                     "app_context": app_context,
                     "goal": goal,
@@ -1283,9 +1586,9 @@ with tabs[3]:
                     "customization": customization,
                     "artifacts": artifacts,
                 }
-                st.success("受付内容を保存しました。")
+                st.success("Intake saved.")
         with col_d:
-            if st.button("Intent Spec 生成 (AI)"):
+            if st.button("Generate Intent Spec (AI)"):
                 spec, error, source = generate_intent_spec(
                     app_context=app_context,
                     goal=goal,
@@ -1307,13 +1610,14 @@ with tabs[3]:
                 spec["inputs"] = spec_inputs
                 st.session_state["intent_spec"] = spec
                 st.session_state["intent_spec_source"] = source
+                _upsert_intent_history(spec, source)
                 st.session_state["intent_spec_error"] = error
                 if error:
                     st.warning(error)
                 else:
                     st.success("Intent Spec generated by AI.")
 
-        if st.button("Intent Spec 生成 (Template)"):
+        if st.button("Generate Intent Spec (Template)"):
             spec, error, source = generate_intent_spec(
                 app_context=app_context,
                 goal=goal,
@@ -1334,6 +1638,7 @@ with tabs[3]:
             spec["inputs"] = spec_inputs
             st.session_state["intent_spec"] = spec
             st.session_state["intent_spec_source"] = source
+            _upsert_intent_history(spec, source)
             st.session_state["intent_spec_error"] = error
             st.success("Intent Spec generated from template.")
 
@@ -1452,10 +1757,168 @@ with tabs[4]:
                 if isinstance(st.session_state.get("intent_spec"), dict)
                 else "missing",
             },
+            {
+                "input_tab": "4) Semantic Input: Intent",
+                "hub_path": "automation_assets.intent_spec_history",
+                "current": len(st.session_state.get("intent_spec_history") or []),
+            },
         ],
     )
 
     semantic_spec = _collect_semantic_payload_from_state(st.session_state.get("semantic_layer_spec") or {})
+    intent_history = _normalize_dict_rows(st.session_state.get("intent_spec_history"))
+    rule_ir_rows = _build_rule_ir_relationship_rows(
+        st.session_state.get("rules") or [],
+        st.session_state.get("proposed_rules") or [],
+        intent_history,
+    )
+    ir_coverage_rows = _build_ir_coverage_rows(
+        intent_history,
+        st.session_state.get("rules") or [],
+        st.session_state.get("proposed_rules") or [],
+    )
+
+    st.markdown("<div class='psb-label'>Rule / IR Relationship Map</div>", unsafe_allow_html=True)
+    map_col_a, map_col_b, map_col_c = st.columns(3)
+    with map_col_a:
+        st.metric("IR history", len(intent_history))
+    with map_col_b:
+        st.metric("Linked rules", len([row for row in rule_ir_rows if row.get("status") == "linked"]))
+    with map_col_c:
+        st.metric(
+            "Unlinked proposed",
+            len([row for row in rule_ir_rows if row.get("source") == "proposed_rule" and row.get("status") == "unlinked"]),
+        )
+
+    if rule_ir_rows:
+        st.dataframe(rule_ir_rows, use_container_width=True, hide_index=True)
+    else:
+        st.info("No rule/IR relationships available yet.")
+
+    st.markdown("<div class='psb-label'>IR Coverage</div>", unsafe_allow_html=True)
+    if ir_coverage_rows:
+        st.dataframe(ir_coverage_rows, use_container_width=True, hide_index=True)
+    else:
+        st.info("No IR coverage rows yet.")
+
+    st.markdown("<div class='psb-label'>Relationship Maintenance</div>", unsafe_allow_html=True)
+    unlinked_proposed = [
+        row for row in rule_ir_rows if row.get("source") == "proposed_rule" and row.get("status") == "unlinked"
+    ]
+    maintenance_rows = []
+    for row in unlinked_proposed:
+        maintenance_rows.append(
+            {
+                "select": False,
+                "proposed_index": row.get("index"),
+                "subject_filter": row.get("subject_filter"),
+                "action_id": row.get("action_id"),
+                "task_name": row.get("task_name"),
+            }
+        )
+    edited_unlinked = st.data_editor(
+        maintenance_rows,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="unlinked_proposed_maintenance_editor",
+    )
+    selected_unlinked_indices = [
+        int(row.get("proposed_index"))
+        for row in edited_unlinked
+        if row.get("select") and isinstance(row.get("proposed_index"), int)
+    ]
+    maintenance_col_a, maintenance_col_b = st.columns([1, 1])
+    with maintenance_col_a:
+        if st.button("Remove Selected Unlinked Proposed"):
+            if not selected_unlinked_indices:
+                st.warning("No unlinked proposed rules selected.")
+            else:
+                remaining = [
+                    rule
+                    for idx, rule in enumerate(st.session_state.get("proposed_rules") or [])
+                    if idx not in set(selected_unlinked_indices)
+                ]
+                removed = len((st.session_state.get("proposed_rules") or [])) - len(remaining)
+                st.session_state["proposed_rules"] = remaining
+                st.success(f"Removed {removed} unlinked proposed rules.")
+                st.rerun()
+    with maintenance_col_b:
+        if st.button("Queue Missing IR Rules To Proposed"):
+            merged, summary = _queue_missing_ir_rules(
+                intent_history,
+                st.session_state.get("rules") or [],
+                st.session_state.get("proposed_rules") or [],
+            )
+            st.session_state["proposed_rules"] = merged
+            st.success(
+                f"Queued {summary['added']} IR-derived rules "
+                f"(skipped duplicates {summary['skipped_duplicates']}, invalid {summary['skipped_invalid']})."
+            )
+            st.rerun()
+
+    st.markdown("<div class='psb-label'>Architecture Views</div>", unsafe_allow_html=True)
+    st.caption("Switch between system-design table view and Mermaid flow view for hub maintenance.")
+    diagram_mode = st.radio(
+        "Visualization mode",
+        ["table", "mermaid"],
+        key="diagram_mode",
+    )
+    st.session_state["diagram_mode"] = diagram_mode
+    if diagram_mode == "table":
+        st.markdown("<div class='psb-label'>Node Table</div>", unsafe_allow_html=True)
+        st.dataframe(_build_hub_node_rows(semantic_spec), use_container_width=True, hide_index=True)
+        st.markdown("<div class='psb-label'>Edge Table</div>", unsafe_allow_html=True)
+        st.dataframe(_build_hub_edge_rows(semantic_spec), use_container_width=True, hide_index=True)
+    else:
+        if not st.session_state.get("mermaid_flow"):
+            st.session_state["mermaid_flow"] = _semantic_mermaid_from_spec(semantic_spec)
+        st.session_state["mermaid_flow"] = st.text_area(
+            "Mermaid flow",
+            value=st.session_state.get("mermaid_flow") or "",
+            height=220,
+            key="mermaid_flow_editor",
+        )
+        st.markdown(
+            "```mermaid\n"
+            f"{st.session_state.get('mermaid_flow') or ''}\n"
+            "```"
+        )
+        st.session_state["mermaid_ai_prompt"] = st.text_area(
+            "AI prompt for Mermaid update",
+            value=st.session_state.get("mermaid_ai_prompt") or "",
+            placeholder="e.g. Add a review gate between proposed rules and active rules.",
+            height=70,
+            key="mermaid_ai_prompt_editor",
+        )
+        mermaid_col_a, mermaid_col_b = st.columns([1, 1])
+        with mermaid_col_a:
+            if st.button("Refresh Mermaid From Hub Data"):
+                st.session_state["mermaid_flow"] = _semantic_mermaid_from_spec(semantic_spec)
+                st.success("Mermaid refreshed from current hub state.")
+                st.rerun()
+        with mermaid_col_b:
+            if st.button("AI Help: Generate Mermaid Draft"):
+                ai_prompt = (st.session_state.get("mermaid_ai_prompt") or "").strip()
+                if not ai_prompt:
+                    st.warning("AI prompt for Mermaid is empty.")
+                else:
+                    ai_spec, ai_error, ai_source = generate_intent_spec(
+                        app_context="semantic_hub_visualization",
+                        goal=ai_prompt,
+                        scope="Generate mermaid-ready maintenance flow",
+                        success="Flow is useful for rule and IR maintenance",
+                        artifacts="semantic hub",
+                        use_ai=True,
+                        model=st.session_state.get("intent_llm_model", "gpt-4o-mini"),
+                    )
+                    if ai_error:
+                        st.warning(ai_error)
+                    ai_mermaid = _semantic_mermaid_from_intent_steps(ai_spec)
+                    if not ai_mermaid:
+                        ai_mermaid = _semantic_mermaid_from_spec(semantic_spec)
+                    st.session_state["mermaid_flow"] = ai_mermaid
+                    st.success(f"AI Mermaid draft generated ({ai_source}).")
+                    st.rerun()
 
     purpose = semantic_spec.get("purpose") if isinstance(semantic_spec.get("purpose"), dict) else {}
     technical_metadata = (

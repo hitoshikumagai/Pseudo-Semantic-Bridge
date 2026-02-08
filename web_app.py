@@ -1146,8 +1146,8 @@ with tabs[2]:
                 st.warning(help_error)
     with help_col_b:
         if st.button("Use Instruction As Draft Prompt"):
-            st.session_state["rule_draft_prompt_input"] = user_instruction or ""
-            st.success("Copied current instruction into AI draft prompt.")
+            st.session_state["sync_rule_draft_prompt"] = True
+            st.rerun()
 
     if st.session_state.get("candidate_help_message"):
         st.info(st.session_state["candidate_help_message"])
@@ -1189,6 +1189,8 @@ with tabs[2]:
     st.write("")
     st.markdown("<div class='psb-label'>AI Draft Rules From Human Input</div>", unsafe_allow_html=True)
     st.caption("Human writes intent -> AI generates draft rules -> human reviews in Proposed Rules queue.")
+    if st.session_state.pop("sync_rule_draft_prompt", False):
+        st.session_state["rule_draft_prompt_input"] = st.session_state.get("candidate_user_instruction") or ""
     draft_prompt = st.text_area(
         "Draft instruction",
         value=user_instruction,
@@ -1863,7 +1865,6 @@ with tabs[4]:
         ["table", "mermaid"],
         key="diagram_mode",
     )
-    st.session_state["diagram_mode"] = diagram_mode
     if diagram_mode == "table":
         st.markdown("<div class='psb-label'>Node Table</div>", unsafe_allow_html=True)
         st.dataframe(_build_hub_node_rows(semantic_spec), use_container_width=True, hide_index=True)

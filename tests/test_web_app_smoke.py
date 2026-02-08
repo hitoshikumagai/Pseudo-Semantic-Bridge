@@ -11,12 +11,39 @@ class _DummyContext:
         return False
 
 
+class _FakeSessionState(dict):
+    def __init__(self, initial=None):
+        super().__init__(initial or {})
+        self._widget_keys = set()
+        self._widget_write = False
+
+    def bind_widget_key(self, key, value):
+        self._widget_keys.add(key)
+        self._widget_write = True
+        try:
+            super().__setitem__(key, value)
+        finally:
+            self._widget_write = False
+
+    def __setitem__(self, key, value):
+        if key in self._widget_keys and not self._widget_write:
+            raise RuntimeError(f"session_state key '{key}' cannot be set after widget instantiation")
+        super().__setitem__(key, value)
+
+
 class _FakeStreamlit(types.ModuleType):
     def __init__(self, pressed_buttons=None, initial_session_state=None):
         super().__init__("streamlit")
-        self.session_state = dict(initial_session_state or {})
+        self.session_state = _FakeSessionState(initial_session_state or {})
         self.calls = []
         self.pressed_buttons = set(pressed_buttons or [])
+
+    def _widget_value(self, key, default):
+        if not key:
+            return default
+        value = self.session_state.get(key, default)
+        self.session_state.bind_widget_key(key, value)
+        return value
 
     def set_page_config(self, **kwargs):
         self.calls.append(("set_page_config", kwargs))
@@ -40,33 +67,28 @@ class _FakeStreamlit(types.ModuleType):
         return [_DummyContext() for _ in range(count)]
 
     def data_editor(self, data, **kwargs):
-        self.calls.append(("data_editor", kwargs.get("key")))
-        return data
+        key = kwargs.get("key")
+        self.calls.append(("data_editor", key))
+        return self._widget_value(key, data)
 
     def button(self, label, **kwargs):
         self.calls.append(("button", label))
         return label in self.pressed_buttons
 
     def number_input(self, label, **kwargs):
-        return kwargs.get("value", 0)
+        return self._widget_value(kwargs.get("key"), kwargs.get("value", 0))
 
     def text_area(self, label, **kwargs):
-        key = kwargs.get("key")
-        if key and key in self.session_state:
-            return self.session_state[key]
-        return kwargs.get("value", "")
+        return self._widget_value(kwargs.get("key"), kwargs.get("value", ""))
 
     def text_input(self, label, **kwargs):
-        key = kwargs.get("key")
-        if key and key in self.session_state:
-            return self.session_state[key]
-        return kwargs.get("value", "")
+        return self._widget_value(kwargs.get("key"), kwargs.get("value", ""))
 
     def checkbox(self, label, **kwargs):
-        return kwargs.get("value", False)
+        return self._widget_value(kwargs.get("key"), kwargs.get("value", False))
 
     def selectbox(self, label, options, **kwargs):
-        return options[0]
+        return self._widget_value(kwargs.get("key"), options[0])
 
     def expander(self, label, **kwargs):
         return _DummyContext()
@@ -78,7 +100,7 @@ class _FakeStreamlit(types.ModuleType):
         return ""
 
     def radio(self, label, options, **kwargs):
-        return options[0]
+        return self._widget_value(kwargs.get("key"), options[0])
 
     def caption(self, *args, **kwargs):
         self.calls.append(("caption",))
@@ -463,3 +485,18 @@ def test_intent_ai_help_button_sets_message(monkeypatch):
         initial_session_state={"intent_help_seed": "Need approval-aware flow"},
     )
     assert fake_st.session_state.get("intent_help_message")
+
+
+def test_diagram_mode_widget_key_does_not_raise_on_import(monkeypatch):
+    _module, fake_st, _tracker = _import_web_app_with_fakes(monkeypatch, pressed_buttons=set())
+    assert fake_st.session_state.get("diagram_mode") in {"table", "mermaid"}
+
+
+def test_use_instruction_as_draft_prompt_uses_safe_rerun_pattern(monkeypatch):
+    _module, fake_st, _tracker = _import_web_app_with_fakes(
+        monkeypatch,
+        pressed_buttons={"Use Instruction As Draft Prompt"},
+        initial_session_state={"candidate_user_instruction": "prioritize OCR", "rule_draft_prompt_input": "old"},
+    )
+    assert fake_st.session_state.get("rule_draft_prompt_input") == "prioritize OCR"
+    assert any(call[0] == "rerun" for call in fake_st.calls)

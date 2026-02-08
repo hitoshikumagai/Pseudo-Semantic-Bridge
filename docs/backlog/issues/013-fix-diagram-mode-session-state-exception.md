@@ -1,7 +1,7 @@
 # Fix diagram_mode session_state mutation after widget instantiation
 
 ## Status
-Open
+Done (2026-02-08)
 
 ## Goal
 Resolve Streamlit runtime failure in Semantic Layer Hub caused by mutating widget-bound session state after widget creation.
@@ -35,3 +35,8 @@ Resolve Streamlit runtime failure in Semantic Layer Hub caused by mutating widge
 - Refactor `diagram_mode` handling to rely on widget-managed state only.
 - Add/adjust a smoke test covering hub visualization mode rendering.
 - Run full regression in conda env: `conda run -n pseudo-semantic-bridge pytest -q`.
+
+## Resolution Notes
+- Removed direct mutation of `st.session_state["diagram_mode"]` after `st.radio(..., key="diagram_mode")`.
+- Switched draft-prompt copy action to rerun-safe flag flow to avoid post-instantiation mutation of widget key `rule_draft_prompt_input`.
+- Hardened fake Streamlit in smoke tests to detect illegal widget-key mutations.

@@ -294,6 +294,7 @@ def _import_web_app_with_fakes(monkeypatch, pressed_buttons=None, initial_sessio
     )
     monkeypatch.setitem(sys.modules, "src.web.app_logic", fake_app_logic)
 
+    monkeypatch.delitem(sys.modules, "src.web.ui.semantic_helpers", raising=False)
     monkeypatch.delitem(sys.modules, "web_app", raising=False)
     module = importlib.import_module("web_app")
     return module, fake_st, tracker

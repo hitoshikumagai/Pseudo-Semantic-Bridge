@@ -1,7 +1,7 @@
 # Refactor web_app.py for modularity and performance
 
 ## Status
-Open
+Done (2026-02-08)
 
 ## Goal
 Reduce `web_app.py` complexity and improve responsiveness by separating UI concerns, state orchestration, and heavy processing paths.
@@ -38,3 +38,12 @@ Reduce `web_app.py` complexity and improve responsiveness by separating UI conce
 
 ## Notes
 - Prefer small, reviewable commits per extraction phase to keep rollback easy.
+
+## Resolution Notes
+- Extracted semantic/state helper logic from `web_app.py` into `src/web/ui/semantic_helpers.py`.
+- `web_app.py` now delegates semantic payload sync, readiness checks, rule/IR relationship mapping, and Mermaid generation through shared module functions.
+- Reduced `web_app.py` size from 2372 lines to 1834 lines while keeping behavior unchanged.
+- Updated smoke test import helper to reload `src/web/ui/semantic_helpers` each run so fake `streamlit` state stays isolated.
+- Regression checks passed:
+- `pytest -q tests/test_web_app_smoke.py` (`12 passed`)
+- `conda run -n pseudo-semantic-bridge pytest -q` (`131 passed`)
